@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Readable digest of the git log, which is the brain's operation log (01 § 8).
+
+Context: optional helper for humans and agents. There is no log.md; every
+operation is one commit with a parseable message (03 § 6). This script
+renders them as one line per operation, or filters by operation type.
+
+Usage: tools/log [--op ingest|compile|query|lint|edit|index|schema]
+                 [--since 2026-01-01] [-n 50] [--format line|md]
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brainlib import repo_root  # noqa: E402
+
+SUBJECT_RE = re.compile(r"^(?P<op>[a-z]+)(?:\((?P<channel>[a-z]+)\))?:\s*(?P<title>.*)$")
+TRAILERS = ("Disposition", "Source", "Pages", "Invoked-by", "Agent", "Overrides-human", "Note")
+
+
+def parse(body: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in body.splitlines():
+        for key in TRAILERS:
+            if line.startswith(f"{key}:"):
+                out[key] = line[len(key) + 1:].strip()
+    return out
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--op", help="only this operation type")
+    ap.add_argument("--since")
+    ap.add_argument("-n", type=int, default=50)
+    ap.add_argument("--format", choices=("line", "md"), default="line")
+    args = ap.parse_args(argv)
+    root = repo_root()
+    cmd = ["git", "log", f"-n{args.n}", "--format=%H%x1f%as%x1f%an%x1f%s%x1f%b%x1e"]
+    if args.since:
+        cmd.append(f"--since={args.since}")
+    if args.op:
+        cmd.append(f"--grep=^{args.op}\\b")
+    out = subprocess.run(cmd, cwd=root, capture_output=True, text=True, check=True).stdout
+    for rec in out.split("\x1e"):
+        rec = rec.strip("\n")
+        if not rec.strip():
+            continue
+        sha, date, author, subject, body = (rec.split("\x1f") + [""] * 5)[:5]
+        m = SUBJECT_RE.match(subject)
+        if args.op and not (m and m.group("op") == args.op):
+            continue
+        t = parse(body)
+        who = t.get("Invoked-by") or author
+        if args.format == "line":
+            extra = f" [{t['Disposition']}]" if t.get("Disposition") else ""
+            print(f"{date} {sha[:8]} {subject}{extra} ({who})")
+        else:
+            print(f"## [{date}] {subject}")
+            print(f"- Commit: {sha[:8]}; by: {who}")
+            for key in ("Disposition", "Source", "Pages", "Overrides-human", "Note"):
+                if t.get(key):
+                    print(f"- {key}: {t[key]}")
+            print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

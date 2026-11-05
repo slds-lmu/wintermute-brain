@@ -1,0 +1,56 @@
+# Regenerate the index files on main after every merge (01 § 7, 03 § 2.1)
+# and apply the safe link fix. Indexes are never part of PRs, so this
+# Action is their single writer and parallel PRs never conflict on them.
+# Commits as brain-agent-index (agents.txt). Needs branch protection to
+# allow this workflow (or the GitHub App) to push to main.
+name: index
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: index-main
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    # Skip the Action's own commits to avoid a loop.
+    if: github.event.head_commit.author.email != 'brain-agent-index@agents.invalid'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # A token with push rights; the default token cannot bypass a
+          # required check on a protected branch. Use the GitHub App's
+          # token (06 § 4) stored as BRAIN_APP_TOKEN, or allow the
+          # brain-agent-index identity in the branch protection rule.
+          token: ${{ secrets.BRAIN_APP_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet pyyaml
+
+      - name: Regenerate indexes and normalise links
+        run: |
+          python3 tools/index
+          python3 tools/lint --fix --no-stale --no-orphans --no-gitleaks || true
+
+      - name: Commit and push if anything changed
+        run: |
+          git add -A index.md wiki
+          git diff --cached --quiet && { echo "indexes current"; exit 0; }
+          git -c user.name=brain-agent-index -c user.email=brain-agent-index@agents.invalid \
+            commit --quiet -m "index: regenerate" -m "Agent: brain-agent-index" -m "Invoked-by: github-actions"
+          # Someone may have merged meanwhile; rebase and retry a few times.
+          for i in 1 2 3; do
+            git pull --rebase --quiet origin main && git push --quiet origin HEAD:main && exit 0
+            sleep 5
+          done
+          echo "could not push the index commit"; exit 1

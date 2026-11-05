@@ -229,3 +229,62 @@ About 50 unmarked items in `proposals.md`:
   qmd. Sketch: an auth proxy in front of qmd's MCP endpoint checks the
   caller's GitHub token against the repo's permissions. Fits the tiers
   later (one repo per tier).
+
+## Implementation (2026-11-05)
+
+Owner declared the spec stage finished; specs 00–06 are marked
+**accepted** and the MVP (00 § 7) is implemented in this repo, which now
+*is* the brain repo (to become `slds-lmu/brain-group`). Nothing has run
+against GitHub or the server yet.
+
+### Built
+
+| Part | Where | Spec |
+|---|---|---|
+| Repo skeleton: `raw/`, `wiki/<type>/`, `templates/`, `agents.txt`, LFS attributes, generated indexes | repo root | 01 |
+| `tools/index` (per-folder indexes, `page/` split by first letter) | `tools/` | 01 § 7, 04 R3 |
+| `tools/lint` (all rules of 03 § 5.1; safe fixes with `--fix`; lock + human-line rules with `--agent`) | `tools/` | 03 § 5.1, 01 § 5.3 |
+| `tools/check_evidence` (fork of v0's checker; per-paragraph citations → raw folders; `--queue` = compile backlog) | `tools/` | 03 § 3, G2 |
+| `tools/start-op`, `tools/commit-op` (worktree; indexes; lint; preconditions; agent author; PR with auto-merge; `--check` for CI) | `tools/` | 03 § 2, § 6, A2 |
+| `tools/log`, `tools/report-health` ("Brain health" issue comments) | `tools/` | 01 § 8, 03 § 5.3 |
+| Tests: good fixture wiki + one broken copy per rule + git flow (38 tests, all pass) | `tools/tests/` | L6 |
+| Required check (`check.yml`) and index Action (`index.yml`) | `.github/workflows/` | 03 § 2.1 |
+| Plugin: `/brain-ingest`, `/brain-ask`, `/brain-edit`, `/brain-lint`, `brain` skill (forked SKILL.md with our rules), qmd MCP config | `plugin/` | 05, 03 |
+| Session digests: Stop/SessionStart/SessionEnd hooks, background digest agent (Haiku), gitleaks, raw-only PR via the GitHub API | `plugin/scripts/` | 02 § 2 |
+| Server: compile worker (poll, derived queue, 3 tries + backoff, qmd re-index), GitHub App token, qmd auth proxy, systemd units | `server/` | 06, 02 § 2.4 |
+| Schema `CLAUDE.md`, `README.md`, `plugin/README.md`, `server/README.md` | repo | 01 § 2 |
+
+### Decisions taken while implementing (owner to confirm)
+
+- **One repo.** Brain content, `tools/`, the plugin (`plugin/`) and the
+  server code live in this repo; the wintermute marketplace points at
+  `plugin/` (snippet in `plugin/README.md`). Simplest thing that keeps
+  CI, tools and the skill in one place.
+- **Session digest ids** carry the repo name, the title and the first 6
+  chars of the session id (`src-YYYYMMDD-<repo>-<title>-<sid6>`), so
+  parallel digests of different sessions never collide. Checkpoints are
+  derived from `source.yaml` (`session`, `messages`); a local cache
+  speeds it up.
+- **Digest trigger:** 20 new human turns, or 30 minutes since the last
+  digest with at least 3 new turns; session end/start flush needs 3.
+- **Index Action also applies the safe link fix** on `main` (Obsidian's
+  slash-less links), so a human push never fails the check for that.
+- **Compile worker model:** `sonnet` by default (`BRAIN_MODEL`).
+- **Lint levels:** slash-less links are a warning (auto-fixed on main),
+  relative and broken links are errors; open Disputed blocks are `info`.
+- `tools/lint --check-index` is only run on pushes to `main` (PRs never
+  carry index files).
+
+### Not done / needs a real environment
+
+- Nothing was run against GitHub: branch protection, the required check,
+  auto-merge, the GitHub App, LFS quotas (06 § 8) are set up by hand.
+- `.mcp.json` uses `${VAR:-default}` expansion; verify Claude Code
+  expands it, else set `BRAIN_QMD_URL` explicitly.
+- The qmd MCP HTTP flags depend on the pinned qmd version (not chosen).
+- 10-paper PDF converter benchmark (I12) still to run; paper ingest
+  currently relies on litdownload (arXiv TeX/HTML) only.
+- The LLM lint (03 § 5.2) is a prompt in the skill, by hand only (as specified).
+- Obsidian: whether `/wiki/...` links resolve is still untested.
+- The session hook was smoke-tested with a fake transcript (spawns a
+  digest, no crash); an end-to-end digest needs `gh` access to the real repo.

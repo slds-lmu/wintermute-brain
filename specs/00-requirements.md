@@ -1,6 +1,6 @@
 # 00 — Requirements
 
-Status: **draft**
+Status: **accepted** (owner, 2026-11-05; implemented, see today.md)
 Owner: Bernd Bischl
 Last updated: 2026-11-05
 

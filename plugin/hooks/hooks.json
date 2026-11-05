@@ -1,0 +1,41 @@
+{
+  "description": "Automatic session digests (02 § 2): after each reply, check whether enough new material has accumulated and digest it in the background; at session start, digest older sessions' undigested tails; at session end, flush the last piece.",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/brain-session.sh\" stop",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/brain-session.sh\" start",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/brain-session.sh\" end",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

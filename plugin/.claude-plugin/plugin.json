@@ -1,0 +1,8 @@
+{
+  "name": "brain",
+  "version": "0.1.0",
+  "description": "The SLDS brain: ingest sources into the group's LLM-maintained wiki, ask it questions, edit and lint it, and capture knowledge from Claude Code sessions automatically.",
+  "author": { "name": "SLDS" },
+  "license": "MIT",
+  "keywords": ["wiki", "knowledge-base", "llm-wiki", "slds"]
+}

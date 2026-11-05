@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""Grounding check: literals on wiki pages must exist verbatim in the raw
+files of the sources cited in the same paragraph (03 § 3, v0-foundation G2).
+
+Forked from Astro-Han/karpathy-llm-wiki `scripts/check_evidence.py` (MIT).
+Changes for our data model: YAML frontmatter instead of blockquote
+metadata; citations are inline links to summary pages
+(`/wiki/paper/<id>.md`, `/wiki/source/<id>.md`) that resolve to
+`raw/<channel>/<YYYY>/<id>/` through the shared id (01 § 3); evidence is
+checked per paragraph against that paragraph's citations; a paper or
+source page is implicitly cited by its own raw item.
+
+Report-only; never modifies files. Three sweeps:
+1. Fidelity: candidate literals per paragraph (quotes ≥ 15 chars, ISO
+   dates, specific numbers) that no cited raw file contains, and
+   paragraphs with literals but no citation at all.
+2. Evidence errors: citations whose id has no raw folder, or raw
+   folders without any text file.
+3. Backlog: raw items without a summary page (= the compile queue).
+
+Candidate set (closed, as in v0): quotes of 15+ characters, ISO dates
+(YYYY-MM-DD, YYYY-MM), thousands-grouped, dotted, suffixed (42K, 99.9%)
+or 4+ digit numbers. Small plain integers are left to the
+locate-before-write rule and to judgment review.
+
+Usage: tools/check_evidence [--root DIR] [--strict] [--queue] [page.md ...]
+  --strict   exit 1 if there are suspects or evidence errors
+  --queue    print only raw item folders without a summary page, one per line
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brainlib import (  # noqa: E402
+    RAW_TEXT_SUFFIXES, Page, extract_links, iter_pages, load_page, raw_dir_for_id,
+    raw_item_dirs, repo_root, summary_page_for_raw,
+)
+
+NUMBER_TOKEN_RE = re.compile(
+    r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)*(?:\s*[KMB%](?![A-Za-z]))?"
+    r"|\d+(?:\.\d+)*(?:\s*[KMB%](?![A-Za-z]))?)(?![A-Za-z])"
+)
+SUFFIX_RE = re.compile(r"[KMB%]$")
+DATE_RE = re.compile(r"\d{4}-\d{2}(?:-\d{2})?")
+QUOTE_RES = [re.compile(r'"([^"\n]*)"'), re.compile(r"“([^”\n]*)”")]
+LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+HEADING_RE = re.compile(r"^#{1,6}\s")
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+STATUS_LINE_RE = re.compile(r"^>\s*\*\*Status:")
+CITATION_RE = re.compile(r"^wiki/(paper|source)/([a-z0-9-]+)\.md$")
+WS_RE = re.compile(r"\s+")
+
+
+@dataclass(frozen=True)
+class Candidate:
+    kind: str
+    value: str
+
+
+@dataclass
+class Unit:
+    """One paragraph, list item or blockquote: the citation scope."""
+    start_line: int
+    lines: list[str]
+
+    @property
+    def text(self) -> str:
+        return " ".join(l.strip().lstrip(">").strip() for l in self.lines)
+
+
+def normalize(text: str) -> str:
+    return WS_RE.sub(" ", text).strip()
+
+
+def strip_noise(text: str) -> str:
+    """Inline code is not a claim. Link labels of internal links (citations
+    such as "[Karpathy 2026](/wiki/paper/…)") are labels, not claims, so
+    they are dropped; external link labels stay."""
+    text = INLINE_CODE_RE.sub(" ", text)
+    return LINK_RE.sub(lambda m: " " if m.group(2).startswith("/") else m.group(1), text)
+
+
+def keep_number(token: str) -> bool:
+    token = token.strip()
+    if SUFFIX_RE.search(token) or "," in token or "." in token:
+        return True
+    return len(token) >= 4
+
+
+def numeric_date_candidates(line: str) -> list[Candidate]:
+    line = strip_noise(line)
+    dates = list(DATE_RE.finditer(line))
+    out = [Candidate("date", m.group(0)) for m in dates]
+    masked = list(line)
+    for m in dates:
+        masked[m.start():m.end()] = " " * (m.end() - m.start())
+    out.extend(Candidate("number", m.group(0)) for m in NUMBER_TOKEN_RE.finditer("".join(masked)) if keep_number(m.group(0)))
+    return out
+
+
+def unit_candidates(unit: Unit) -> list[Candidate]:
+    joined = normalize(strip_noise(unit.text))
+    out: list[Candidate] = []
+    for line in unit.lines:
+        if STATUS_LINE_RE.match(line.strip()):
+            continue
+        out.extend(numeric_date_candidates(line.strip().lstrip(">")))
+    for quote_re in QUOTE_RES:
+        out.extend(Candidate("quote", m.group(1)) for m in quote_re.finditer(joined) if len(m.group(1).strip()) >= 15)
+    seen = set()
+    unique = []
+    for c in out:
+        value = c.value.strip().strip(".,;:()[]")
+        c = Candidate(c.kind, normalize(value))
+        if value and c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique
+
+
+def split_units(body: str, first_line_no: int) -> list[Unit]:
+    """Paragraphs separated by blank lines; each list item and each
+    blockquote run is its own unit; headings and fences are skipped."""
+    units: list[Unit] = []
+    cur: Unit | None = None
+    fence = None
+    for i, raw in enumerate(body.splitlines(), first_line_no):
+        line = raw.rstrip("\n")
+        if fence:
+            m = FENCE_CLOSE_RE.match(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            continue
+        m = FENCE_OPEN_RE.match(line)
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+            if cur:
+                units.append(cur)
+                cur = None
+            continue
+        stripped = line.strip()
+        if not stripped or HEADING_RE.match(stripped):
+            if cur:
+                units.append(cur)
+                cur = None
+            continue
+        is_quote = stripped.startswith(">")
+        is_item = bool(LIST_ITEM_RE.match(line))
+        if cur is None:
+            cur = Unit(i, [line])
+        elif is_item or (is_quote != cur.lines[0].strip().startswith(">")):
+            units.append(cur)
+            cur = Unit(i, [line])
+        else:
+            cur.lines.append(line)
+    if cur:
+        units.append(cur)
+    return units
+
+
+def contains(haystack: str, c: Candidate) -> bool:
+    if c.kind == "quote":
+        return c.value in haystack
+    right = r"(?!-\d{2})" if c.kind == "date" and len(c.value) == 7 else ""
+    pattern = r"(?<![\d.,])" + re.escape(c.value) + right + r"(?![A-Za-z0-9]|[.,]\d|%)"
+    return re.search(pattern, haystack) is not None
+
+
+class RawCache:
+    def __init__(self, root: Path):
+        self.root = root
+        self.cache: dict[str, str | None] = {}
+
+    def text(self, source_id: str) -> str | None:
+        """Concatenated, whitespace-normalised text of the raw item's text
+        files (source.yaml excluded: bookkeeping is not evidence)."""
+        if source_id in self.cache:
+            return self.cache[source_id]
+        d = raw_dir_for_id(self.root, source_id)
+        if d is None:
+            self.cache[source_id] = None
+            return None
+        parts = []
+        for f in sorted(d.rglob("*")):
+            if f.is_file() and f.suffix.lower() in RAW_TEXT_SUFFIXES and f.name != "source.yaml":
+                try:
+                    parts.append(f.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+        self.cache[source_id] = normalize("\n".join(parts)) if parts else ""
+        return self.cache[source_id]
+
+
+def check_page(page: Page, raws: RawCache) -> tuple[list[str], list[str]]:
+    """Return (fidelity suspects, evidence errors) for one page."""
+    suspects: list[str] = []
+    errors: list[str] = []
+    own_id = page.slug if page.type_dir in ("paper", "source") else None
+    if own_id and raws.text(own_id) is None:
+        errors.append(f"summary page has no raw item: raw/*/*/{own_id}/")
+    fm_lines = page.text[: len(page.text) - len(page.body)].count("\n")
+    for unit in split_units(page.body, fm_lines + 1):
+        cands = unit_candidates(unit)
+        if not cands:
+            continue
+        cited: list[str] = []
+        for link in extract_links("\n".join(unit.lines)):
+            if link.kind != "internal" or not link.path:
+                continue
+            m = CITATION_RE.match(link.path)
+            if m:
+                cited.append(m.group(2))
+        if own_id:
+            cited.append(own_id)
+        texts = []
+        for sid in dict.fromkeys(cited):
+            t = raws.text(sid)
+            if t is None:
+                errors.append(f"line {unit.start_line}: citation {sid} has no raw folder")
+            elif t == "":
+                errors.append(f"line {unit.start_line}: raw item {sid} has no text files to check against")
+            else:
+                texts.append(t)
+        if not cited:
+            for c in cands:
+                suspects.append(f"line {unit.start_line}: {c.value} (no citation in this paragraph)")
+            continue
+        if not texts:
+            continue
+        for c in cands:
+            if not any(contains(t, c) for t in texts):
+                suspects.append(f"line {unit.start_line}: {c.value}")
+    return suspects, errors
+
+
+def backlog(root: Path) -> list[Path]:
+    return [d for d in raw_item_dirs(root) if summary_page_for_raw(root, d) is None]
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("pages", nargs="*")
+    ap.add_argument("--root", type=Path)
+    ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--queue", action="store_true")
+    args = ap.parse_args(argv)
+    root = (args.root or repo_root()).resolve()
+    if args.queue:
+        for d in backlog(root):
+            print(d.relative_to(root).as_posix())
+        return 0
+    if args.pages:
+        pages = []
+        for arg in args.pages:
+            p = Path(arg)
+            p = p if p.is_absolute() else root / p
+            if not p.is_file():
+                print(f"warning: not found: {arg}", file=sys.stderr)
+                continue
+            pages.append(load_page(root, p))
+    else:
+        pages = iter_pages(root)
+    raws = RawCache(root)
+    results = {p.rel: check_page(p, raws) for p in pages}
+
+    print("# Evidence check\n")
+    print("## Fidelity suspects")
+    n_susp = 0
+    for rel, (susp, _) in results.items():
+        if susp:
+            print(f"\n{rel}")
+            for s in susp:
+                print(f"- {s}")
+                n_susp += 1
+    if not n_susp:
+        print("\n(none)")
+    print("\n## Evidence errors")
+    n_err = 0
+    for rel, (_, errs) in results.items():
+        if errs:
+            print(f"\n{rel}")
+            for e in errs:
+                print(f"- {e}")
+                n_err += 1
+    if not n_err:
+        print("(none)")
+    print("\n## Raw items without a summary page")
+    todo = backlog(root)
+    for d in todo:
+        print(f"- {d.relative_to(root).as_posix()}")
+    if not todo:
+        print("(none)")
+    print(f"\n## Summary\n{n_susp} fidelity suspect(s), {n_err} evidence error(s), {len(todo)} raw item(s) without a summary page")
+    return 1 if args.strict and (n_susp or n_err) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -1,0 +1,26 @@
+# systemd unit for the compile worker (06 § 4). Install:
+#   sudo cp server/brain-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now brain-worker
+# Config lives in /etc/brain/worker.env (see server/README.md); the GitHub
+# App token is minted at every (re)start and the service restarts hourly
+# so it never expires mid-run.
+[Unit]
+Description=SLDS brain compile worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brain
+EnvironmentFile=/etc/brain/worker.env
+# Mint a fresh 1-hour installation token into the environment file's
+# companion, then run the worker with it.
+ExecStartPre=/bin/sh -c 'echo "GH_TOKEN=$(python3 ${BRAIN_DIR}/server/github-app-token.py)" > /run/brain/token.env'
+RuntimeDirectory=brain
+ExecStart=/bin/sh -c '. /run/brain/token.env; export GH_TOKEN; exec python3 ${BRAIN_DIR}/server/worker.py'
+RuntimeMaxSec=55min
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
