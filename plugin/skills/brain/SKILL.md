@@ -23,16 +23,18 @@ history is the log (`$T/log`).
 
 | Setting | Env var | Default |
 |---|---|---|
-| local clone of the brain content | `BRAIN_DIR` | `~/wintermute-brain-content-slds` |
+| local clone of the brain content | `BRAIN_DIR` | `~/brain/wintermute-brain-content-slds` |
 | GitHub repo of the content | `BRAIN_REPO` | `slds-lmu/wintermute-brain-content-slds` |
 | the brain tools | `$T` | `<this skill's base directory>/../../tools` |
 | your person slug (`first-last`) | `BRAIN_PERSON` | from `git config user.name` |
 | search server (qmd MCP) | `BRAIN_QMD_URL` | `http://localhost:8181/mcp` |
 
-Query works without a clone when the `brain-search` MCP server is reachable.
-Ingest, edit and lint need the clone, over HTTPS and with LFS downloads
-skipped: `GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/<BRAIN_REPO>.git`. If `BRAIN_DIR` is missing, tell the user
-how to clone it and stop.
+The `brain` command sets these from the member's settings
+(`~/.config/brain/config.toml`) and updates the clone at startup. Read a
+single setting with `echo "$BRAIN_DIR"` (never dump the whole environment:
+it holds the token). If `BRAIN_DIR` is unset or missing, the session was
+not started with `brain`: tell the user to run `setup-brain` once and
+start with `brain`, and stop.
 
 **The tools ship with this plugin** (code and content are separate repos,
 01 § 1). Before running any of them, set `T` to the plugin's `tools/` folder:

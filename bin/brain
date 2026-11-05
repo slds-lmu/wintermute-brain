@@ -58,11 +58,13 @@ def main(argv: list[str]) -> int:
     code = expand(cfg["code_dir"])
     if argv[:1] == ["--check"]:
         return check(cfg, env)
-    # Latest code (06 § 2.1); a failed update is not fatal.
-    r = subprocess.run(["git", "-C", str(code), "pull", "--quiet", "--ff-only", "origin", "main"],
-                       env=env, capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"brain: could not update the code ({r.stderr.strip()[:120]}); using the local copy", file=sys.stderr)
+    # Latest code and current content (06 § 2.1); a failed update is not fatal.
+    for what, repo in (("code", code), ("brain content", Path(env["BRAIN_DIR"]))):
+        r = subprocess.run(["git", "-C", str(repo), "pull", "--quiet", "--ff-only"],
+                           env=dict(env, GIT_LFS_SKIP_SMUDGE="1"), capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"brain: could not update the {what} ({r.stderr.strip()[:120]}); using the local copy",
+                  file=sys.stderr)
     claude = shutil.which("claude")
     if not claude:
         sys.exit("brain: Claude Code (claude) not found")

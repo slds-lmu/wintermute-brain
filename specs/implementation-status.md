@@ -357,3 +357,22 @@ ingest. Findings (open unless marked):
   from the git name; write access confirmed; clones without PDFs; config
   and `brain` installed; git reached the content repo with the same login
   (the 403 of test 1 is gone).
+- **Worked:** `brain` in a new terminal started Claude Code; in the code
+  repo (not listed under `capture`) no capture notice was shown, as
+  intended (N6 fixed in practice).
+- **N19, fixed in the tutorial:** the capture list was only mentioned in
+  one sentence; § 3 and § 6 still described the old behaviour ("where
+  the plugin is enabled"), and nothing said how to add a project or how
+  to tell whether a session is captured.
+
+- **N20, fixed:** the ask agent did not find the clone: `env` was denied
+  by the user's permissions and the skill's default folder
+  (`~/wintermute-brain-content-slds`) did not match `setup-brain`'s
+  (`~/brain/…`). The skill now uses the same default and reads single
+  settings with `echo`, never the whole environment (it holds the token).
+- **N21, fixed:** `brain` updated the code but not the content clone, so
+  answers could be stale; it now updates both at startup.
+- **Worked:** `/brain:brain-ask` on the demo project: cited, open points
+  listed, assistant contributions marked, and the difference between the
+  raw digest and the corrected wiki page explained. N12 (no search
+  address) still open.

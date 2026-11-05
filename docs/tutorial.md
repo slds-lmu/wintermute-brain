@@ -105,8 +105,8 @@ fetches the source, removes secrets, checks it against `scope.md`, stores
 it in `raw/`, classifies it (new, update, disputed, no new material),
 writes its summary page and updates the affected pages in one PR.
 
-**Session capture (automatic).** In projects where the plugin is
-enabled, hooks digest the conversation in the background every ~20
+**Session capture (automatic).** In folders a member has put on their
+capture list, hooks digest the conversation in the background every ~20
 messages. A small model keeps decisions, findings, failed approaches,
 how-tos and open questions, and by default nothing. Each digest is added
 to `raw/` by PR; the compile worker turns digests into pages one at a
@@ -137,9 +137,8 @@ Reading a brain needs nothing but access to its content repo (section
 3. **Start work with `brain`** instead of `claude`. It updates the code,
    loads the brain plugin and your settings for this session.
 
-Sessions are captured only in folders listed under `capture` in your
-settings; by default that is the brain's own folder. The content repo's
-README has the exact commands.
+Which sessions are captured is controlled by your capture list (section
+6). The content repo's README has the exact commands.
 
 ## 5. Reading
 
@@ -194,13 +193,26 @@ we decide about the evaluation protocol of project X?"
 **Adding sources.** `ingest <url | DOI | arXiv id | file>`, one source
 per request.
 
-**Session capture.** Work with the plugin loaded and decisions and
-findings are captured automatically, including the names of the people
-involved; code, chatter, personal remarks and secrets are not. Stating
-the reason for a decision makes the digest useful. Each captured session
-starts with a one-line notice; capture can be switched off per session
-or per repo, and anyone can ask the owner to remove content about them,
-including from the history.
+**Session capture.** A `brain` session is captured only if it runs in a
+folder on your **capture list**, or below one. The list is the `capture`
+entry in your settings file `~/.config/brain/config.toml`; after setup it
+holds only the brain's own folder. To capture your work on a project,
+add its folder:
+
+```toml
+capture = ["~/brain/wintermute-brain-content-slds", "~/projects/my-project"]
+```
+
+- A captured session starts with a one-line notice; no notice means
+  nothing is captured.
+- Captured are decisions, findings, failed approaches and open
+  questions, including the names of the people involved; never code,
+  chatter, personal remarks or secrets. Stating the reason for a
+  decision makes the digest useful.
+- Switch capture off for one session with `BRAIN_SESSION_DIGEST=off
+  brain`; remove a folder from the list to stop capturing it.
+- Anyone can ask the owner to remove content about them, including from
+  the history.
 
 **Scope.** Sources outside a brain's `scope.md` are ingested but flagged
 until someone deletes them or clears the flag.
