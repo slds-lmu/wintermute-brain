@@ -104,8 +104,7 @@ Problems found and how they were handled:
     ingest relies on litdownload (arXiv TeX/HTML) until then.
   - qmd: pick and pin a version (its MCP HTTP flags depend on it); test
     at several thousand files; set up on the server.
-- **Not yet tested live:** the session hooks firing on their own (the
-  digest step was run by hand), the server worker on the server. Paper
+- **Not yet tested live:** the server worker on the actual server. Paper
   ingest was done by Marc (PR #15).
 - Who administers the server worker and the API key (06 § 8).
 
@@ -202,8 +201,11 @@ Problems found and how they were handled:
     spawns nothing (pending flag); the SessionEnd flush digests a tail
     of 3 messages (PR #3); checkpoint advances (1–4, 5–13); the compile
     queue comes out oldest first on real data.
-  - **Not exercised:** the catch-up at SessionStart (the end flush got
-    there first; same code path).
+  - **Catch-up at SessionStart passed** (2026-11-05): a 3-message
+    session with capture off, backdated 20 minutes; a new session in
+    the same project digested its messages 1–7 at start (content PR
+    #10). The new session's single message was not digested (end flush
+    needs 3). The digest marked both assistant suggestions as such.
   - **FIXED (2026-11-05, rule "mark it"):** digest prompt, 02 § 2.3,
     compile prompt and skill keep assistant contributions marked, never
     in titles, Decisions or Results. Was: **Finding:** digests record the assistant's own contributions
