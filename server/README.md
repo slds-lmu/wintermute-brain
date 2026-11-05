@@ -130,6 +130,8 @@ Modern MCP requests carry protocolVersion, clientCapabilities, and
 clientInfo in params._meta under their io.modelcontextprotocol/ keys.
 The MCP-Protocol-Version header must match. Older clients use the SDK's
 legacy HTTP fallback; the gateway preserves JSON and SSE response types.
+Modern requests also set Mcp-Method and, for tool calls, Mcp-Name to
+match the JSON-RPC body.
 
 Application changes use an ordinary development branch and review PR.
 Content operations continue to use the pinned plugin/tools write path.

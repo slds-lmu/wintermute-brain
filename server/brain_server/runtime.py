@@ -211,6 +211,8 @@ class QmdRuntime:
             headers={
                 "Accept": "application/json, text/event-stream",
                 "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": "query",
             },
             json={
                 "jsonrpc": "2.0", "id": 1, "method": "tools/call",
