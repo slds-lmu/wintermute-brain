@@ -61,7 +61,8 @@ one command sets everything up and checks it; one command starts work.
      **(b)** a dedicated token for the brain (a fine-grained token
      limited to the content repo; contents, pull requests, issues: read
      and write; actions: read), stored in a file only the member can
-     read. "Brain login" via the GitHub App later (K39);
+     read. The code repo is public (owner, 2026-11-05), so no token
+     needs access to it. "Brain login" via the GitHub App later (K39);
   3. clones the code repo and the content repo over HTTPS, without PDFs
      (LFS downloads skipped);
   4. configures the content clone so that git uses the same credentials

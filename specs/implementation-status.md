@@ -337,3 +337,15 @@ ingest. Findings (open unless marked):
   kept the staged paper, showed its plan (paper page, new `mlr3mbo`
   page, link from the person page), and left the DOI empty instead of
   taking it from another source.
+
+### User test 2, with `setup-brain` (2026-11-05)
+
+- **N17** The README asks for a brain token with write access to the
+  content repo but read-only access to the code repo. Fine-grained
+  tokens cannot do that: permissions apply to all selected repos.
+  Options: (a) one token for both repos with the same permissions (it
+  can then also write to the code repo); (b) make the code repo public
+  (no token access needed for it; its history still holds the pre-split
+  test content); (c) two tokens. **Decided (owner): (b), the code repo
+  becomes public.** A gitleaks scan of its full history (all branches)
+  found no secrets. The brain token then needs only the content repo.

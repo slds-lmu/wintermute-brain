@@ -9,9 +9,9 @@ result. Safe to run again: existing clones are kept and updated.
 Login modes:
   gh     your normal `gh auth login`
   token  a dedicated fine-grained token for the brain: owner = the
-         content repo's organisation; repositories = the content repo
-         (contents, pull requests, issues: read and write; actions: read)
-         and the code repo (contents: read)
+         content repo's organisation; repository = the content repo only
+         (contents, pull requests, issues: read and write; actions: read).
+         The code repo is public and needs no access.
 
 Usage:
   setup-brain                         interactive
@@ -118,13 +118,18 @@ def main(argv: list[str]) -> int:
     env = session_env(cfg)
 
     print("3. Access")
-    for repo, need in ((cfg["repo"], "push"), (CODE_REPO, "pull")):
-        r = run(["gh", "api", f"repos/{repo}", "--jq", f".permissions.{need}"], env, check=False)
-        if r.stdout.strip() != "true":
-            sys.exit(f"   no {need} access to {repo} with this login. "
-                     + ("Give the token access to it (see setup-brain --help)." if login == "token"
-                        else "Ask an admin for access, or use a brain token."))
-        print(f"   {repo}: {need} ok")
+    r = run(["gh", "api", f"repos/{cfg['repo']}", "--jq", ".permissions.push"], env, check=False)
+    if r.stdout.strip() != "true":
+        sys.exit(f"   no write access to {cfg['repo']} with this login. "
+                 + ("Give the token access to it (see setup-brain --help)." if login == "token"
+                    else "Ask an admin for access, or use a brain token."))
+    print(f"   {cfg['repo']}: write ok")
+    # The code repo is public: reachable without any login.
+    r = run(["git", "ls-remote", "--heads", f"https://github.com/{CODE_REPO}.git", "main"],
+            dict(os.environ, GIT_TERMINAL_PROMPT="0"), check=False)
+    if r.returncode != 0 or not r.stdout.strip():
+        sys.exit(f"   cannot reach {CODE_REPO} (public): {r.stderr.strip()[:200]}")
+    print(f"   {CODE_REPO}: reachable")
 
     print("4. Clones (no PDFs)")
     clone(CODE_REPO, expand(cfg["code_dir"]), env)
