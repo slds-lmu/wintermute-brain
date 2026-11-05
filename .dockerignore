@@ -1,0 +1,12 @@
+*
+!server/
+!server/**
+!tools/
+!tools/**
+!plugin/
+!plugin/**
+!CLAUDE.md
+!agents.txt
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/

@@ -248,6 +248,7 @@ def main(argv: list[str]) -> int:
                     help="why a page changed, one per changed page: 'type/slug: why'")
     ap.add_argument("--upstream", default="origin/main")
     ap.add_argument("--no-pr", action="store_true", help="push straight to main (fast-forward) instead of a PR")
+    ap.add_argument("--draft", action="store_true", help="open or update a technical review PR without auto-merge")
     ap.add_argument("--wait", type=int, default=1200,
                     help="seconds to wait for the PR to merge (0 = don't wait); default 20 min: GitHub's auto-merge took up to ~9 min in the live test")
     ap.add_argument("--cleanup", action="store_true", help="remove the worktree after success")
@@ -292,7 +293,7 @@ def main(argv: list[str]) -> int:
         log("run inside an operation worktree (tools/start-op), not on main")
         return 3
     base = git(["merge-base", "HEAD", upstream], root).strip()
-    if git(["rev-parse", "HEAD"], root).strip() != base:
+    if git(["rev-parse", "HEAD"], root).strip() != base and not args.draft:
         log("the operation branch already has commits; one operation is one commit (start over)")
         return 3
 
@@ -365,13 +366,24 @@ def main(argv: list[str]) -> int:
         git(["push", "--quiet", "-u", "origin", f"HEAD:refs/heads/{branch}"], root)
         body = "\n".join(message.splitlines()[2:])
         try:
-            pr_url = gh(["pr", "create", "--base", "main", "--head", branch, "--title", args.message, "--body", body], root).stdout.strip()
-            gh(["pr", "merge", "--auto", "--rebase", pr_url], root)
+            existing = gh(["pr", "view", branch, "--json", "url", "--jq", ".url"], root, check=False) if args.draft else None
+            if existing and existing.returncode == 0:
+                pr_url = existing.stdout.strip()
+            else:
+                with tempfile.NamedTemporaryFile("w", suffix=".md") as description:
+                    description.write(body)
+                    description.flush()
+                    cmd = ["pr", "create", "--base", "main", "--head", branch, "--title", args.message, "--body-file", description.name]
+                    if args.draft:
+                        cmd.append("--draft")
+                    pr_url = gh(cmd, root).stdout.strip()
+            if not args.draft:
+                gh(["pr", "merge", "--auto", "--rebase", pr_url], root)
         except GitError as exc:
             log(str(exc))
             return 2
-        log(f"opened {pr_url} with auto-merge")
-        if args.wait > 0:
+        log(f"review PR: {pr_url}" if args.draft else f"opened {pr_url} with auto-merge")
+        if args.wait > 0 and not args.draft:
             outcome, why = wait_for_merge(root, pr_url, args.wait)
             if outcome == "unknown":
                 log(f"outcome unknown: {why}. The PR stays open: {pr_url}. "

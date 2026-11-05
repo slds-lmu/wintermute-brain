@@ -10,14 +10,14 @@ cache and may be deleted.
 
 Environment
   BRAIN_DIR        clone of the brain repo (full LFS fetch)       required
-  BRAIN_REPO       GitHub repo slug                               slds-lmu/brain-group
+  BRAIN_REPO       GitHub repo slug                               slds-lmu/wintermute-brain
   BRAIN_PLUGIN_DIR the plugin directory (skill, commands)         $BRAIN_DIR/plugin
   BRAIN_MODEL      model for the compile agent                    sonnet
   BRAIN_POLL       seconds between polls                          300
   BRAIN_MAX_TRIES  attempts per item before reporting + 24 h backoff   3
-  BRAIN_QMD        qmd command to re-index after a pull, "" = none     qmd update
+  BRAIN_QMD        optional external re-index command; search owns indexing
   ANTHROPIC_API_KEY  group API key with a spending limit (06 § 5)
-  GH_TOKEN         GitHub App installation token (server/github-app-token.py)
+  GitHub authentication is provided by the renewing git and gh wrappers.
 
 Usage: worker.py [--once] [--dry-run]
 """
@@ -34,12 +34,12 @@ import time
 from pathlib import Path
 
 BRAIN_DIR = Path(os.environ.get("BRAIN_DIR", "")).expanduser()
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/brain-group")
+REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain")
 PLUGIN_DIR = Path(os.environ.get("BRAIN_PLUGIN_DIR", str(BRAIN_DIR / "plugin")))
 MODEL = os.environ.get("BRAIN_MODEL", "sonnet")
 POLL = int(os.environ.get("BRAIN_POLL", "300"))
 MAX_TRIES = int(os.environ.get("BRAIN_MAX_TRIES", "3"))
-QMD = os.environ.get("BRAIN_QMD", "qmd update")
+QMD = os.environ.get("BRAIN_QMD", "")
 AGENT = "brain-agent-compile"
 STATE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "brain-worker" / "backoff.json"
 BACKOFF = 24 * 3600
@@ -75,6 +75,8 @@ def pull() -> bool:
 
 def queue() -> list[str]:
     r = sh([sys.executable, str(BRAIN_DIR / "tools" / "check_evidence"), "--queue"], BRAIN_DIR)
+    if r.returncode:
+        raise RuntimeError("compile queue check failed: " + r.stderr.strip()[:300])
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
 
 
@@ -104,8 +106,9 @@ def compile_item(item: str, dry_run: bool) -> bool:
             return True
         env = dict(os.environ, BRAIN_DIR=str(BRAIN_DIR), BRAIN_REPO=REPO, BRAIN_SESSION_DIGEST="off")
         r = subprocess.run(cmd, cwd=wt, capture_output=True, text=True, env=env, timeout=3600)
-        tail = (r.stdout or r.stderr).strip()[-600:]
-        log(f"agent finished ({r.returncode}): {tail}")
+        # Agent output can contain private source text. Keep the operational
+        # result in the log, and use git and the health issue for provenance.
+        log(f"agent finished ({r.returncode})")
         # Success = the summary page exists on main now.
         pull()
         return queue().count(item) == 0
@@ -130,6 +133,8 @@ def cycle(dry_run: bool) -> None:
     state = load_state()
     now = time.time()
     for item in queue():
+        if os.environ.get("BRAIN_AUTO_COMPILE", "true").lower() != "true":
+            break
         entry = state.get(item, {"tries": 0, "until": 0})
         if entry.get("until", 0) > now:
             continue
@@ -152,11 +157,13 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="print the agent command instead of running it")
     args = ap.parse_args(argv)
-    if not BRAIN_DIR.is_dir() or not (BRAIN_DIR / "tools").is_dir():
-        print("BRAIN_DIR must point at a clone of the brain repo", file=sys.stderr)
-        return 2
     while True:
         try:
+            if not (BRAIN_DIR / ".git").exists():
+                BRAIN_DIR.parent.mkdir(parents=True, exist_ok=True)
+                result = sh(["git", "clone", "https://github.com/" + REPO + ".git", str(BRAIN_DIR)])
+                if result.returncode:
+                    raise RuntimeError("initial clone failed: " + result.stderr.strip()[-300:])
             cycle(args.dry_run)
         except Exception as exc:  # noqa: BLE001 - the loop must survive
             log(f"cycle failed: {exc}")

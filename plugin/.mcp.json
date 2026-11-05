@@ -2,7 +2,7 @@
   "mcpServers": {
     "brain-search": {
       "type": "http",
-      "url": "${BRAIN_QMD_URL:-http://localhost:8181/mcp}",
+      "url": "${BRAIN_QMD_URL:-https://api.wintermute-gpu.stat.uni-muenchen.de/brain/mcp}",
       "headers": {
         "Authorization": "Bearer ${BRAIN_GITHUB_TOKEN:-}"
       }
