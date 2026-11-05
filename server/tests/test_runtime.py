@@ -2,21 +2,20 @@ import asyncio
 import fcntl
 import json
 import os
+import signal
+import socket
+import stat
 import sys
 import time
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import fakeredis.aioredis
-import httpx
 import pytest
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from brain_server import github_auth
-from brain_server.app import RepoAccess, create_app
-from brain_server.runtime import QmdRuntime, QueueDemand, live_gpu_requests
+from brain_server.runtime import CpuQmd, QmdRuntime, QueueDemand, live_gpu_requests
 
 
 class Demand:
@@ -215,173 +214,229 @@ def test_app_token_cache_renews_before_expiry(tmp_path, monkeypatch):
     assert len(issued) == 2
 
 
-@pytest.mark.parametrize("permission, expected", [(True, True), (False, False)])
-def test_personal_repo_access_and_hashed_cache(permission, expected):
+def test_finished_request_is_not_recreated(tmp_path, monkeypatch):
+    gone = tmp_path / "finished.request"
+    monkeypatch.setattr(Path, "glob", lambda self, pattern: iter([gone]))
+    assert not live_gpu_requests(tmp_path)
+    assert not gone.exists()
+
+
+def test_handoff_stops_qmd_when_a_search_outlasts_the_drain(runtime_environment, monkeypatch):
     async def exercise():
-        calls = []
+        monkeypatch.setenv("BRAIN_GPU_DRAIN", "0.01")
+        runtime = Runtime(Demand())
+        runtime.process = Process()
+        runtime.ready.set()
+        signals = []
 
-        def github(request):
-            calls.append(request)
-            return httpx.Response(
-                200, json={"login": "member"} if request.url.path == "/user"
-                else {"permissions": {"pull": permission}},
-            )
+        def kill(pid, sig):
+            signals.append(sig)
+            runtime.process.returncode = -sig
 
-        async with httpx.AsyncClient(transport=httpx.MockTransport(github)) as client:
-            access = RepoAccess(client, "slds-lmu/wintermute-brain")
-            assert await access.allowed("personal-token") is expected
-            assert await access.allowed("personal-token") is expected
-            assert len(calls) == 2
-            assert "personal-token" not in repr(access.cache)
+        monkeypatch.setattr(os, "killpg", kill)
+        release = asyncio.Event()
+
+        async def search():
+            async with runtime.admission():
+                await release.wait()
+
+        active = asyncio.create_task(search())
+        await asyncio.sleep(0)
+        await asyncio.wait_for(runtime.pause(), 1)
+        assert signals == [signal.SIGKILL]
+        assert runtime.process is None
+        release.set()
+        await active
+        assert runtime.idle.is_set()
+        await runtime.client.aclose()
 
     asyncio.run(exercise())
 
 
-class GatewayRuntime:
-    state = "ready"
-    upstream = "http://qmd"
-    busy = False
-
-    async def run(self):
-        await asyncio.Event().wait()
-
-    def status(self):
-        return {"state": self.state, "ready": not self.busy}
-
-    @asynccontextmanager
-    async def admission(self):
-        if self.busy:
-            raise asyncio.TimeoutError
-        yield
-
-
-class Access:
-    async def allowed(self, token):
-        return token == "member-token"
-
-
-@pytest.mark.parametrize("method,rpc_method,active", [
-    ("POST", "subscriptions/listen", 0),
-    ("GET", None, 0),
-    ("POST", "tools/call", 1),
-])
-def test_gateway_streams_before_eof_and_releases_admission_on_disconnect(method, rpc_method, active):
+def test_refresh_is_skipped_while_a_search_outlasts_the_drain(runtime_environment, monkeypatch):
     async def exercise():
-        class TrackedRuntime(GatewayRuntime):
-            active = 0
+        monkeypatch.setenv("BRAIN_GPU_DRAIN", "0.01")
+        runtime = QmdRuntime(Demand())
+        runtime.ready.set()
+        commands = []
 
-            @asynccontextmanager
-            async def admission(self):
-                self.active += 1
-                try:
-                    yield
-                finally:
-                    self.active -= 1
+        async def command(*args, **kwargs):
+            commands.append(args)
+            return ""
 
-        class OpenStream(httpx.AsyncByteStream):
-            closed = False
+        runtime.command = command
+        release = asyncio.Event()
 
-            async def __aiter__(self):
-                yield b"event: message\ndata: {}\n\n"
-                await asyncio.Event().wait()
+        async def search():
+            async with runtime.admission():
+                await release.wait()
 
-            async def aclose(self):
-                self.closed = True
-
-        runtime = TrackedRuntime()
-        stream = OpenStream()
-        app = create_app(runtime=runtime, access=Access())
-        disconnect = asyncio.Event()
-        first_chunk = asyncio.Event()
-        upstream_started = asyncio.Event()
-        release_headers = asyncio.Event()
-        received = False
-
-        async def qmd(request):
-            upstream_started.set()
-            await release_headers.wait()
-            return httpx.Response(
-                200, headers={"Content-Type": "text/event-stream"}, stream=stream,
-            )
-
-        async def receive():
-            nonlocal received
-            if not received:
-                received = True
-                return {"type": "http.request", "body": json.dumps({"method": rpc_method}).encode()}
-            await disconnect.wait()
-            return {"type": "http.disconnect"}
-
-        async def send(message):
-            if message["type"] == "http.response.body" and message.get("body"):
-                first_chunk.set()
-
-        scope = {
-            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
-            "http_version": "1.1", "method": method, "scheme": "http",
-            "path": "/mcp", "raw_path": b"/mcp", "query_string": b"", "root_path": "",
-            "headers": [(b"authorization", b"Bearer member-token")],
-            "client": ("127.0.0.1", 1), "server": ("test", 80),
-        }
-        async with app.router.lifespan_context(app), httpx.AsyncClient(
-            transport=httpx.MockTransport(qmd),
-        ) as upstream:
-            app.state.qmd = upstream
-            request = asyncio.create_task(app(scope, receive, send))
-            try:
-                await asyncio.wait_for(upstream_started.wait(), 1)
-                assert runtime.active == active
-                release_headers.set()
-                await asyncio.wait_for(first_chunk.wait(), 1)
-                assert not request.done()
-                assert runtime.active == active
-                assert not stream.closed
-            finally:
-                release_headers.set()
-                disconnect.set()
-                await asyncio.wait_for(request, 1)
-            assert stream.closed
-            assert runtime.active == 0
+        active = asyncio.create_task(search())
+        await asyncio.sleep(0)
+        await runtime.refresh()
+        assert not commands
+        assert runtime.last_refresh > 0
+        release.set()
+        await active
+        await runtime.client.aclose()
 
     asyncio.run(exercise())
 
 
-def test_gateway_auth_protocol_and_gpu_wait(monkeypatch):
-    monkeypatch.setenv("BRAIN_SEARCH_SERVICE_TOKEN", "internal-service-token")
-    runtime = GatewayRuntime()
-    app = create_app(runtime=runtime, access=Access())
-    seen = []
+def test_coordinator_survives_a_failed_release(runtime_environment, monkeypatch):
+    async def exercise():
+        monkeypatch.setenv("BRAIN_GPU_POLL", "0")
+        runtime = QmdRuntime(Demand())
+        steps = []
+        pauses = []
+        real_sleep = asyncio.sleep
 
-    def qmd(request):
-        seen.append(request)
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
+        async def step():
+            steps.append(True)
+            if len(steps) == 2:
+                runtime.stopping = True
+            raise RuntimeError("step failed")
 
-    with TestClient(app) as client:
-        assert client.post("/mcp", json={}).status_code == 401
-        assert client.post("/mcp", headers={"Authorization": "Bearer invalid"}).status_code == 401
-        app.state.qmd = httpx.AsyncClient(transport=httpx.MockTransport(qmd))
-        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-        response = client.post("/mcp", json=payload, headers={
-            "Authorization": "Bearer member-token",
-            "Origin": "https://public.example",
-            "MCP-Protocol-Version": "2026-07-28",
-        })
-        assert response.status_code == 200
-        assert json.loads(seen[0].content) == payload
-        assert seen[0].headers["MCP-Protocol-Version"] == "2026-07-28"
-        assert "authorization" not in seen[0].headers
-        assert "origin" not in seen[0].headers
-        assert client.post("/mcp", json=payload, headers={
-            "Authorization": "Bearer internal-service-token",
-        }).status_code == 401
-        assert client.post("/internal/mcp", json=payload, headers={
-            "Authorization": "Bearer member-token",
-        }).status_code == 401
-        assert client.post("/internal/mcp", json=payload, headers={
-            "Authorization": "Bearer internal-service-token",
-        }).status_code == 200
-        runtime.busy = True
-        response = client.post("/mcp", json=payload, headers={"Authorization": "Bearer member-token"})
-        assert response.status_code == 503
-        assert response.headers["Retry-After"] == "5"
-        assert client.get("/healthz").status_code == 200
+        async def pause(state="paused"):
+            pauses.append(state)
+            if len(pauses) == 1:
+                raise ProcessLookupError
+
+        async def no_wait(seconds):
+            await real_sleep(0)
+
+        runtime.step = step
+        runtime.pause = pause
+        monkeypatch.setattr(asyncio, "sleep", no_wait)
+        await asyncio.wait_for(runtime.run(), 2)
+        assert len(steps) == 2
+        assert pauses == ["error", "error", "stopped"]
+
+    asyncio.run(exercise())
+
+
+FAKE_QMD = """#!/usr/bin/env python3
+import http.server, json, os, sys
+
+record = {
+    "pid": os.getpid(),
+    "pgid": os.getpgid(0),
+    "cpu": os.environ.get("QMD_FORCE_CPU"),
+    "gpu": os.environ.get("QMD_LLAMA_GPU"),
+    "devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    "parallelism": os.environ.get("QMD_EMBED_PARALLELISM"),
+    "expand_threads": os.environ.get("QMD_EXPAND_THREADS"),
+    "niceness": os.nice(0),
+    "files": [os.readlink("/proc/self/fd/" + fd) for fd in os.listdir("/proc/self/fd")
+              if os.path.exists("/proc/self/fd/" + fd)],
+    "args": sys.argv[1:],
+}
+with open(os.environ["FAKE_QMD_LOG"], "a") as log:
+    print(json.dumps(record), file=log)
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[-1])), Handler).serve_forever()
+"""
+
+
+def alive(pid: int) -> bool:
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+def test_cpu_qmd_is_killed_restarted_and_never_holds_the_gpu_lock(
+    runtime_environment, tmp_path, monkeypatch,
+):
+    binary = tmp_path / "bin" / "qmd"
+    binary.parent.mkdir()
+    binary.write_text(FAKE_QMD)
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    records = tmp_path / "records"
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    monkeypatch.setenv("PATH", str(binary.parent) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("FAKE_QMD_LOG", str(records))
+    monkeypatch.setenv("BRAIN_CPU_PORT", str(port))
+
+    def started():
+        return [json.loads(line) for line in records.read_text().splitlines()]
+
+    async def exercise():
+        runtime = QmdRuntime(Demand())
+        assert runtime._acquire_gpu()
+        cpu = CpuQmd(runtime)
+        supervisor = asyncio.create_task(cpu.run())
+        try:
+            await asyncio.wait_for(cpu.available.wait(), 20)
+            first = started()[0]
+            assert (first["cpu"], first["gpu"], first["devices"]) == ("1", "false", "")
+            assert first["parallelism"] == cpu.parallelism
+            assert first["expand_threads"] == cpu.expand_threads
+            assert first["niceness"] == int(cpu.nice) + os.nice(0)
+            assert first["args"][:2] == ["mcp", "--http"]
+            assert first["pgid"] == first["pid"]
+            assert not [path for path in first["files"] if "gpu.lock" in path]
+            cpu.abort()
+            assert not cpu.available.is_set()
+            await asyncio.wait_for(cpu.available.wait(), 20)
+            assert not alive(first["pid"])
+            assert started()[1]["pid"] != first["pid"]
+        finally:
+            supervisor.cancel()
+            await asyncio.gather(supervisor, return_exceptions=True)
+            await runtime.pause("stopped")
+            await runtime.client.aclose()
+        assert not alive(started()[-1]["pid"])
+
+    asyncio.run(exercise())
+
+
+def test_cpu_qmd_waits_for_the_repository_and_backs_off_after_a_crash(
+    runtime_environment, tmp_path, monkeypatch,
+):
+    async def exercise():
+        runtime = QmdRuntime(Demand())
+        cpu = CpuQmd(runtime)
+        marker = runtime.repo / ".git" / "brain-ready"
+        marker.unlink()
+        spawned = []
+        delays = []
+        real_sleep = asyncio.sleep
+
+        async def spawn(*args, **kwargs):
+            spawned.append(args)
+            process = Process()
+            process.returncode = 1
+            return process
+
+        async def sleep(seconds):
+            delays.append(seconds)
+            if seconds == 1:
+                marker.touch()
+            if len(delays) > 2:
+                raise asyncio.CancelledError
+            await real_sleep(0)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+        monkeypatch.setattr(runtime, "configure", lambda: None)
+        with pytest.raises(asyncio.CancelledError):
+            await cpu.run()
+        assert delays[0] == 1  # no repository yet
+        assert spawned and delays[1] == 5  # failed start: back off
+        assert not cpu.available.is_set()
+        await runtime.client.aclose()
+
+    asyncio.run(exercise())

@@ -25,6 +25,7 @@ Specs 00–06 accepted; this repo *is* the brain repo (later
 | Plugin: `/brain-ingest`, `/brain-ask`, `/brain-edit`, `/brain-lint`, `brain` skill, qmd MCP config | `plugin/` | 05, 03 |
 | Session digests: Stop/SessionStart/SessionEnd hooks, background digest agent (Haiku), gitleaks, raw-only PR via the GitHub API | `plugin/scripts/` | 02 § 2 |
 | Server: compile worker (poll, derived queue, 3 tries + backoff, qmd re-index), GitHub App token, qmd auth proxy, systemd units | `server/` | 06, 02 § 2.4 |
+| Search gateway: GitHub token checks that survive GitHub outages and limit unauthenticated use, GPU qmd with handoff, CPU qmd that answers model-free calls and races searches while the GPU is taken | `server/brain_server/` | 06 § 3, § 9 |
 
 ## 2. Decisions taken while implementing (owner to confirm)
 

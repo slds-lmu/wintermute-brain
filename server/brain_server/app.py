@@ -1,191 +1,133 @@
-"""Authenticated MCP gateway and qmd GPU lifecycle."""
+"""Authenticated MCP gateway in front of the GPU and CPU qmd."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import secrets
-import time
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 
-from .runtime import QmdRuntime
+from .access import ChecksThrottled, GitHubUnavailable, RepoAccess
+from .routing import HOP_HEADERS, Call, Router, is_search, without_subscriptions
+from .runtime import CpuQmd, QmdRuntime
 
-log = logging.getLogger(__name__)
-HOP_HEADERS = {
-    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-    "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
-}
+MAX_BODY = 1024 * 1024
 
 
-class McpResponse(StreamingResponse):
-    def __init__(self, upstream, admission=None):
-        self.upstream = upstream
-        self.admission = admission
-        super().__init__(
-            self.chunks(), status_code=upstream.status_code,
-            headers={
-                k: v for k, v in upstream.headers.items()
-                if k.lower() not in HOP_HEADERS | {"content-encoding"}
-            },
-        )
+def client_address(request: Request) -> str:
+    # Only Caddy reaches this port, and it appends the address it saw last.
+    forwarded = request.headers.get("x-forwarded-for", "").rsplit(",", 1)[-1].strip()
+    return forwarded or (request.client.host if request.client else "")
 
-    async def chunks(self):
-        try:
-            async for chunk in self.upstream.aiter_bytes():
-                yield chunk
-        except httpx.HTTPError:
-            if self.admission is not None:
-                raise
-            log.debug("qmd notification stream closed")
 
-    async def __call__(self, scope, receive, send):
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
+async def authorization_failure(request: Request, access) -> Response | None:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    allowed = False
+    if scheme.lower() == "bearer" and token:
+        if request.url.path == "/internal/mcp":
+            service_token = os.environ.get("BRAIN_SEARCH_SERVICE_TOKEN", "")
+            allowed = bool(service_token) and secrets.compare_digest(token.encode(), service_token.encode())
+        else:
             try:
-                await self.upstream.aclose()
-            finally:
-                if self.admission is not None:
-                    await self.admission.__aexit__(None, None, None)
+                allowed = await access.allowed(token, client_address(request))
+            except GitHubUnavailable as error:
+                logging.getLogger(__name__).warning("GitHub cannot authorize a request: %s", error)
+                return JSONResponse(
+                    {"detail": "GitHub cannot confirm repository access at the moment"},
+                    status_code=503, headers={"Retry-After": "30"},
+                )
+            except ChecksThrottled:
+                return JSONResponse(
+                    {"detail": "Too many new tokens from this address"},
+                    status_code=429, headers={"Retry-After": "60"},
+                )
+    if allowed:
+        return None
+    return JSONResponse(
+        {"detail": "A GitHub user token with read access to the brain repository is required"},
+        status_code=401, headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
-class RepoAccess:
-    def __init__(self, client: httpx.AsyncClient, repo: str) -> None:
-        self.client = client
-        self.repo = repo
-        self.cache: dict[str, tuple[float, bool]] = {}
-
-    async def allowed(self, token: str) -> bool:
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        hit = self.cache.get(digest)
-        if hit and hit[0] > time.monotonic():
-            return hit[1]
-        headers = {
-            "Authorization": "Bearer " + token,
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "wintermute-brain-search",
-        }
-        try:
-            user = await self.client.get("https://api.github.com/user", headers=headers)
-            repo = await self.client.get(
-                "https://api.github.com/repos/" + self.repo, headers=headers,
-            ) if user.status_code == 200 else None
-            allowed = bool(
-                repo is not None and repo.status_code == 200
-                and repo.json().get("permissions", {}).get("pull")
-            )
-        except (httpx.HTTPError, ValueError):
-            # Do not cache transient GitHub failures as permission decisions.
-            return False
-        if len(self.cache) >= 1024:
-            self.cache = {k: v for k, v in self.cache.items() if v[0] > time.monotonic()}
-            if len(self.cache) >= 1024:
-                self.cache.pop(next(iter(self.cache)))
-        self.cache[digest] = (time.monotonic() + (300 if allowed else 30), allowed)
-        return allowed
-
-
-def create_app(runtime=None, access=None) -> FastAPI:
+def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
-        app.state.runtime = runtime or QmdRuntime()
+        logging.basicConfig(
+            level=os.environ.get("BRAIN_LOG_LEVEL", "INFO"),
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+        # At INFO it logs a line per upstream request.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        gpu_qmd = runtime or QmdRuntime()
+        cpu_qmd = cpu or CpuQmd(gpu_qmd)
+        app.state.runtime = gpu_qmd
+        app.state.cpu = cpu_qmd
         async with (
             httpx.AsyncClient(timeout=15) as github,
-            httpx.AsyncClient(timeout=180) as qmd,
+            httpx.AsyncClient(timeout=180) as own_qmd_client,
         ):
             app.state.access = access or RepoAccess(
                 github, os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds"),
             )
-            app.state.qmd = qmd
-            task = asyncio.create_task(app.state.runtime.run())
+            app.state.router = Router(gpu_qmd, cpu_qmd, qmd_client or own_qmd_client)
+            tasks = [asyncio.create_task(gpu_qmd.run()), asyncio.create_task(cpu_qmd.run())]
             try:
                 yield
             finally:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/healthz")
     async def health():
+        # Public: no content revision here. A failing GPU qmd stays visible to
+        # monitoring although the CPU qmd keeps answering.
         status = app.state.runtime.status()
         failed = status["state"] in {"starting", "waiting_for_repository", "error", "stopped"}
         return JSONResponse(
-            {"status": "unavailable" if failed else "ok", **status},
+            {
+                "status": "unavailable" if failed else "ok",
+                "state": status["state"],
+                "ready": status["ready"],
+                "cpu": app.state.cpu.available.is_set(),
+            },
             status_code=503 if failed else 200,
         )
 
     @app.api_route("/internal/mcp", methods=["GET", "POST", "DELETE"])
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE"])
     async def mcp(request: Request):
-        scheme, _, token = request.headers.get("authorization", "").partition(" ")
-        service_token = os.environ.get("BRAIN_SEARCH_SERVICE_TOKEN", "")
-        if scheme.lower() != "bearer" or not token:
-            allowed = False
-        elif request.url.path == "/internal/mcp":
-            allowed = bool(service_token and secrets.compare_digest(token.encode(), service_token.encode()))
-        else:
-            allowed = bool(token and await app.state.access.allowed(token))
-        if scheme.lower() != "bearer" or not token or not allowed:
-            return JSONResponse(
-                {"detail": "A GitHub user token with read access to the brain repository is required"},
-                status_code=401, headers={"WWW-Authenticate": "Bearer"},
-            )
+        failure = await authorization_failure(request, app.state.access)
+        if failure is not None:
+            return failure
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
-            if len(body) > 1024 * 1024:
+            if len(body) > MAX_BODY:
                 return JSONResponse({"detail": "Request exceeds 1 MiB"}, status_code=413)
-        headers = {
-            k: v for k, v in request.headers.items()
-            if k.lower() not in HOP_HEADERS | {"authorization", "origin", "accept-encoding"}
-        }
         try:
-            payload = json.loads(body) if body else {}
-        except ValueError:
-            payload = {}
-        # Subscription streams stay open between searches. They must not
-        # prevent indexing or GPU handoff while the client remains connected.
-        listener = request.method == "GET" or (
-            isinstance(payload, dict) and payload.get("method") == "subscriptions/listen"
+            payload = json.loads(body) if body else None
+        except (ValueError, RecursionError):
+            payload = None
+        call = Call(
+            method=request.method,
+            body=without_subscriptions(payload, bytes(body)),
+            headers={
+                name: value for name, value in request.headers.items()
+                if name.lower() not in HOP_HEADERS | {"authorization", "origin", "accept-encoding"}
+            },
         )
-        admission = app.state.runtime.admission()
-        entered = False
-        try:
-            await admission.__aenter__()
-            entered = True
-            if listener:
-                await admission.__aexit__(None, None, None)
-                entered = False
-            upstream_request = app.state.qmd.build_request(
-                request.method, app.state.runtime.upstream + "/mcp",
-                content=bytes(body), headers=headers,
-            )
-            response = await app.state.qmd.send(upstream_request, stream=True)
-            result = McpResponse(response, admission if entered else None)
-            entered = False
-            return result
-        except asyncio.TimeoutError:
-            return JSONResponse(
-                {"detail": "Search is waiting for the GPU", "state": app.state.runtime.state},
-                status_code=503, headers={"Retry-After": "5"},
-            )
-        except httpx.HTTPError:
-            log.warning("qmd request failed")
-            return JSONResponse({"detail": "Search backend unavailable"}, status_code=502)
-        finally:
-            if entered:
-                await admission.__aexit__(None, None, None)
+        if is_search(payload):
+            return await app.state.router.search(call, request.is_disconnected)
+        return await app.state.router.control(call)
 
     return app
 

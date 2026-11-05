@@ -49,7 +49,8 @@ and the record.
 ## 3. Search (Q2, Q9)
 
 - **One central qmd on the server**, re-indexed after every pull
-  (§ 4). Members' agents query it over MCP. Hybrid mode uses the GPU.
+  (§ 4). Members' agents query it over MCP. Hybrid mode uses the GPU;
+  a CPU instance of the same qmd answers while the GPU is taken (§ 9).
 - **Fallback:** if the server is unreachable, the agent uses the
   generated indexes plus grep on the local clone. Nothing depends on
   qmd (CLAUDE.md, tool independence).
@@ -140,11 +141,21 @@ the code tag named by its .brain-version before invoking plugin/tools and
 the compile plugin. Service infrastructure runs from the pinned container
 image. Updating the service image does not change the content's tool pin.
 
-qmd models remain resident until another GPU caller requests the shared
-lock. Search drains active requests, stops qmd, waits for process exit,
-and yields the GPU. Queue and running-job checks keep qmd unloaded across
-a MinerU batch; it reloads after a short idle interval. Whisper HTTP stays
-resident. The index and models are local persistent mounts outside images.
+The GPU qmd holds the shared lock until another GPU caller requests it.
+Search drains active requests for a bounded time, stops qmd, waits for
+process exit, and yields the GPU. Queue and running-job checks keep it
+unloaded across a MinerU batch; it reloads after a short idle interval.
+Whisper HTTP stays resident. The index and models are local persistent
+mounts outside images.
+
+A second qmd process runs CPU-only on the same index, at low scheduling
+priority, and never touches the GPU or its lock. It answers every call that
+needs no model. Searches go to the GPU qmd whenever it is available. While
+it is not, a search also starts on the CPU qmd, one search at a time, and
+the first complete answer wins. Both use the same models and settings, so
+a CPU answer has full quality and only takes longer. qmd cannot cancel a
+running search, so abandoning a CPU search kills that process, which
+restarts within a second. An index update waits for the GPU qmd.
 
 Members use personal GitHub tokens with read access to the content repo.
 The compile worker uses a separate internal service credential for MCP.
@@ -154,7 +165,8 @@ installation tokens without periodic worker restarts.
 
 Operational details and validation commands are in server/README.md.
 
-MCP response bodies stream through the gateway. Notification listeners
-remain outside the GPU operation count, so indexing and model handoff
-can proceed while clients are connected. Search calls retain admission
-until completion or disconnect.
+qmd's HTTP server buffers every response until it is complete, so it can
+deliver no notification on an open stream. The gateway therefore asks qmd
+for an empty subscription, which qmd acknowledges and closes immediately.
+Clients learn at connection time that no change notifications will come.
+Search calls hold their GPU admission until completion or disconnect.
