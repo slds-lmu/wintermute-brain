@@ -304,6 +304,20 @@ class EvidenceTest(Temp):
         r = tool("check_evidence", "--root", self.root)
         self.assertNotIn("Jane Registry", r.stdout)
 
+    def test_queue_is_oldest_first_not_alphabetical(self):
+        # live test 2026-11-05: digests were compiled in title order
+        y = "raw/session/2026/"
+        self.write(y + "src-20261105-repo-aaa-later-abc123/digest.md", "# later\n")
+        self.write(y + "src-20261105-repo-aaa-later-abc123/source.yaml",
+                   "id: x\nchannel: session\nretrieved: 2026-11-05\nsession: abc123\nmessages: [50, 80]\n")
+        self.write(y + "src-20261105-repo-zzz-earlier-abc123/digest.md", "# earlier\n")
+        self.write(y + "src-20261105-repo-zzz-earlier-abc123/source.yaml",
+                   "id: y\nchannel: session\nretrieved: 2026-11-05\nsession: abc123\nmessages: [1, 49]\n")
+        r = tool("check_evidence", "--root", self.root, "--queue")
+        lines = r.stdout.split()
+        self.assertEqual([p.rsplit("/", 1)[1] for p in lines],
+                         ["src-20261105-repo-zzz-earlier-abc123", "src-20261105-repo-aaa-later-abc123"])
+
     def test_queue_lists_raw_without_summary(self):
         self.write("raw/web/2026/src-20260101-todo/page.md", "x\n")
         self.write("raw/web/2026/src-20260101-todo/source.yaml", "id: src-20260101-todo\nchannel: web\n")

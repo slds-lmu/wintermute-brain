@@ -21,7 +21,9 @@ Report-only; never modifies files. Three sweeps:
    after the live test (implementation-status § 4, problem 5).
 2. Evidence errors: citations whose id has no raw folder, or raw
    folders without any text file.
-3. Backlog: raw items without a summary page (= the compile queue).
+3. Backlog: raw items without a summary page (= the compile queue),
+   oldest first (author time of the adding commit, then session and
+   message range).
 
 Candidate set (closed, as in v0): quotes of 15+ characters, ISO dates
 (YYYY-MM-DD, YYYY-MM), thousands-grouped, dotted, suffixed (42K, 99.9%)
@@ -37,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -268,8 +271,35 @@ def check_page(page: Page, raws: RawCache) -> tuple[list[str], list[str]]:
     return suspects, errors
 
 
+def _added_at(root: Path, d: Path) -> int | None:
+    """Author time (epoch) of the commit that added the raw item: when the
+    digest or ingest was made. Author time survives rebase-merges, whose
+    committer time reflects the (variable) merge order. None outside git."""
+    try:
+        r = subprocess.run(["git", "log", "--diff-filter=A", "--format=%at", "-1", "--", str(d)],
+                           cwd=root, capture_output=True, text=True)
+    except OSError:
+        return None
+    out = r.stdout.strip().splitlines()
+    return int(out[-1]) if r.returncode == 0 and out else None
+
+
+def queue_key(root: Path, d: Path) -> tuple:
+    """Oldest first (02 § 2.4): when the raw item was made (author time of
+    the commit that added it, else `retrieved`), then session and message range, then name.
+    Live test 2026-11-05: alphabetical order let older digests overwrite
+    newer decisions."""
+    meta = load_source_yaml(d) or {}
+    added = _added_at(root, d)
+    retrieved = str(meta.get("retrieved") or "")
+    msgs = meta.get("messages") or [0]
+    start = msgs[0] if isinstance(msgs, list) and msgs and isinstance(msgs[0], int) else 0
+    return (added if added is not None else float("inf"), retrieved, str(meta.get("session") or ""), start, d.name)
+
+
 def backlog(root: Path) -> list[Path]:
-    return [d for d in raw_item_dirs(root) if summary_page_for_raw(root, d) is None]
+    todo = [d for d in raw_item_dirs(root) if summary_page_for_raw(root, d) is None]
+    return sorted(todo, key=lambda d: queue_key(root, d))
 
 
 def main(argv: list[str]) -> int:

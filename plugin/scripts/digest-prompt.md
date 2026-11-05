@@ -12,7 +12,9 @@ Keep only:
 - open questions.
 
 Never keep: code details (git has them), chatter, dead ends without a lesson,
-personal remarks, credentials or secrets, anything that merely restates
+personal remarks, credentials or secrets, the person's own machine or tool
+setup (their tokens, sandbox, shell or editor configuration; group-wide tool
+conventions are fine to keep), anything that merely restates
 existing wiki pages (e.g. an answer the assistant built from the wiki). Only
 what is *new* in the conversation counts: information the human added,
 decisions, corrections.

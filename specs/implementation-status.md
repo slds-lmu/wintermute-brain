@@ -71,6 +71,7 @@ scratch folder (Marc adds them to the slds docker image).
 | Ingest 2 (web, update): rohitg00's LLM Wiki v2 gist | PR #4; existing page updated, no duplicate; `commit-op` reported "merged" correctly |
 | Index Action via the App | pushed `index: regenerate` after PRs #3 and #4 |
 | Query (by hand, grep fallback) | answer from wiki pages with citations and limits |
+| Session channel end to end: 7 digests of this design session (02 § 2), then one compile-worker pass run by hand (`server/worker.py --once`, Sonnet, no qmd) | 7 digest PRs (#5–#11) and 7 compile PRs (#12–#21), all merged, no failures; one project page `wintermute-brain` built up by update, never duplicated; others ingested in parallel (#15, #16, #19) without conflicts |
 
 Problems found and how they were handled:
 
@@ -121,3 +122,34 @@ Problems found and how they were handled:
 - **GitHub usage checked** (2026-11-05, 06 § 8.1): Team plan; org-wide
   Actions and LFS use are inside the included amounts. Watch Actions
   minutes once session digests run.
+- **Session-channel test findings** (2026-11-05, all open):
+  1. **Long backlogs lose their middle.** A first digest of an
+     undigested long session sends at most 60,000 + 60,000 characters
+     (head and tail); the middle is cut. Fix: digest a backlog in pieces
+     of ~20 turns, as the live hook does.
+  2. **FIXED (2026-11-05):** queue is oldest first (author time of the
+     adding commit, then session and message range; 02 § 2.4; test).
+     Was: **Compile order is alphabetical, not chronological.** The worker's
+     queue sorts raw items by folder name (= title), so later digests can
+     be compiled before earlier ones and older states survive (e.g. "not
+     done: ruleset, GitHub App" on the project page, though both exist).
+     Fix: sort by `retrieved` date, then session and message range.
+  3. **Digests are snapshots.** Each piece sees only its own ~20 turns,
+     so it records "still open" items that were settled minutes later.
+     Compile must let newer digests overwrite (works when order is
+     right, see 2).
+  4. **Assistant errors are copied.** A digest attributed the server
+     setup to "Marc" because the assistant said so; Martin sets it up.
+  5. **FIXED (2026-11-05):** digest rule "never keep personal machine
+     or tool setup" (02 § 2.3, digest prompt). Was: **Personal tool setup leaks in.** Bernd's token setup (yolobox,
+     `ghr`, `~/.gh-tokens`) became a section of the project page. Digest
+     rule to add: skip personal machine and tool setup.
+  6. **Everything lands on one page.** With no project-specific
+     structure, all decisions went onto `wiki/page/wintermute-brain.md`
+     (very long). Acceptable for now; watch page length.
+  7. **Auto-merge latency varies** from ~2 to ~9 minutes (PR #18). The
+     10-minute wait in `commit-op` is tight, and the single-writer
+     worker's throughput is bounded by it.
+  8. **Scope is not checked.** An out-of-scope test source (PR #22,
+     polar-bear tracks at a zoo) can be ingested; neither triage nor
+     lint enforces 00 § 3.

@@ -73,7 +73,9 @@ its own**.
   - conventions and how-tos;
   - open questions.
 - **Never keep:** code details (git has them), chatter, dead ends
-  without a lesson, personal remarks, secrets.
+  without a lesson, personal remarks, secrets, and **personal machine or
+  tool setup** (someone's tokens, sandbox, shell, editor configuration;
+  2026-11-05). Group conventions for tools stay.
 - **Never re-ingest the wiki.** Anything that merely restates brain
   pages (e.g. an answer the agent built from the wiki) is skipped;
   only what is new in the conversation is kept: information the human
@@ -108,7 +110,9 @@ with Claude Code. The digest is the raw source.
    (05 U2). A new folder per digest
    means these PRs never conflict.
 2. **Server (GPU server):** **one** ingest worker processes new raw
-   items that have no summary page yet, one at a time, with the normal
+   items that have no summary page yet, one at a time and **oldest
+   first** (when the item reached the repo, then session and message
+   range; 2026-11-05), with the normal
    ingest rules (`03-agent-ops.md` § 3): triage, update the project
    page, cascade, citations, PR with the required check.
 3. **The queue is derived:** raw items without a summary page. The
