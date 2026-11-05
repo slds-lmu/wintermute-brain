@@ -10,7 +10,7 @@ sudo useradd -m brain
 sudo -iu brain
 # Code and content are separate repos (01 § 1). Clone both over HTTPS:
 git clone https://github.com/slds-lmu/wintermute-brain-content-slds.git ~/content   # full clone incl. LFS
-git clone https://github.com/slds-lmu/wintermute-brain.git ~/code                     # checked out at .brain-version by the worker
+git clone https://github.com/slds-lmu/wintermute-brain.git ~/code                     # updated to the latest main by the worker
 sudo apt install python3-yaml gitleaks                                # or pip install pyyaml + gitleaks release
 npm install -g @anthropic-ai/claude-code                              # the agent CLI
 # qmd: pin a version (01 § 7); it needs ~2 GB of local models for hybrid mode

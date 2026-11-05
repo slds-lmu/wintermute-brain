@@ -26,9 +26,9 @@ working *on the wiki* follow that repo's `CLAUDE.md` and the `brain` skill
 - **This repo never opts in to session digests**: no `.claude/settings.json`
   enabling the brain plugin. Development sessions must not become
   knowledge.
-- Content repos pin a release tag (`.brain-version`); changing the
-  reusable workflows or the tools' behaviour needs a new tag and a PR in
-  the content repo to move to it.
+- For now everyone (members, the content repos' checks, the server
+  worker) runs this repo's latest `main` (06 § 2.1): every push here
+  affects the brains immediately. Pinning to releases comes later (K40).
 - Run `python3 -m unittest discover -s tests` before committing.
 - No commits or pushes unless the user asks.
 

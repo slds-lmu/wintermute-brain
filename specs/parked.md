@@ -42,6 +42,9 @@ the server's search runs) and session capture need none.
 | K36 | **Obsidian: hide `raw/` and the catalogs.** `raw/` clutters file list, search and graph; un-downloaded PDFs appear as LFS pointer stubs. Catalog files (`index*.md`) link to every page and turn the graph into a few hubs. Fixable with shipped settings (excluded files in `.obsidian/app.json`) | owner, 2026-11-05 | 01 § 6 |
 | K37 | **Obsidian: staying current.** The brain changes several times a day and Obsidian does not pull; readers see stale content unless they `git pull`. Options: a pull before reading (script, plugin hook), or the Obsidian Git community plugin (auto-pull) as an optional recommendation | owner, 2026-11-05 | 05, 06 § 2 |
 | K38 | **Editing without git skills.** An edit in Obsidian or an editor only reaches the brain after commit and PR. For non-git users: ask an agent instead (`/brain-edit`), or a helper that commits and opens the PR for them | owner, 2026-11-05 | 03 § 2, 05 |
+| K39 | **"brain login" via the GitHub App.** A command opens the browser once (GitHub device flow) and the brain's own App issues a token limited to the brain's repos: one click, minimal rights. Replaces token handling for members (06 § 2.1, S1) | owner, 2026-11-05 | 06 § 2.1 |
+| K40 | **Members pinned to the brain's release.** The setup (or plugin) checks out the code at the content repo's `.brain-version` and follows it when it changes, so members, CI and server run the same release. For now members use the latest `main` (06 § 2.1, S3) | owner, 2026-11-05 | 06 § 2.1 |
+| K41 | **Marketplace install of the plugin.** Entry in the wintermute marketplace pointing at `slds-lmu/wintermute-brain`, path `plugin`; plain `claude` then works without `--plugin-dir`. Open: one plugin version for all brains a member uses | owner, 2026-11-05 | 06 § 2 |
 
 ## From the O3 decision (2026-11-05)
 

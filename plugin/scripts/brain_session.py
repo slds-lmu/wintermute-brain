@@ -20,6 +20,8 @@ Environment
   BRAIN_DIGEST_TURNS   new human turns that trigger a digest, default 20 (02 I2)
   BRAIN_DIGEST_MINUTES minutes since the last digest that trigger one, default 30
   BRAIN_SESSION_DIGEST set to "off" to disable the channel
+  BRAIN_CAPTURE        folders whose sessions are captured (path list; set by
+                       `brain` from ~/.config/brain/config.toml). Unset = none
 Needs: claude (CLI), gh (logged in), gitleaks (recommended, R15).
 """
 
@@ -238,6 +240,26 @@ def consider(transcript: Path, session_id: str, cwd: str, flush: bool) -> None:
         spawn_digest(transcript, session_id, cwd, done + 1, total)
 
 
+def captured(cwd: str) -> bool:
+    """Only sessions in folders listed in BRAIN_CAPTURE (set by `brain` from
+    the member's config, 06 § 2.1), or below them, are captured. Without
+    the list nothing is captured (user test N6: with --plugin-dir every
+    session was)."""
+    listed = [p for p in os.environ.get("BRAIN_CAPTURE", "").split(os.pathsep) if p]
+    try:
+        here = Path(cwd).resolve()
+    except OSError:
+        return False
+    for p in listed:
+        try:
+            root = Path(p).expanduser().resolve()
+        except OSError:
+            continue
+        if here == root or root in here.parents:
+            return True
+    return False
+
+
 def hook(event: str) -> None:
     try:
         payload = json.load(sys.stdin)
@@ -246,6 +268,8 @@ def hook(event: str) -> None:
     session_id = payload.get("session_id") or ""
     transcript = Path(payload.get("transcript_path") or "")
     cwd = payload.get("cwd") or os.getcwd()
+    if not captured(cwd):
+        return  # not a captured folder: no digest, no notice (06 § 2.1)
     if event in ("stop", "end"):
         if transcript.is_file() and session_id:
             consider(transcript, session_id, cwd, flush=(event == "end"))

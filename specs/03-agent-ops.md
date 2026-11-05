@@ -108,8 +108,8 @@ anything lands on `main`. Every agent operation is **one pull request
 with auto-merge**. A ruleset on `main` requires the check.
 
 - **Required check**: the content repo calls the code repo's reusable
-  workflow `brain-check` at the pinned release, which checks
-  `.brain-version` against it and runs `tools/lint` and the
+  workflow `brain-check` (at `main` for now, 06 § 2.1), which runs
+  `tools/lint` and the
   `commit-op` preconditions against the current `main`):
   - mechanical lint (§ 5.1);
   - files changed in the PR are unchanged on `main` since the PR's

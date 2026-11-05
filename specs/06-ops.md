@@ -33,9 +33,8 @@ and the record.
   repo (`wintermute-brain-content-slds`) does the same (03 § 4); the code repo
   (`wintermute-brain`) never does (01 § 1).
 - **Code and content are separate repos** (01 § 1, 2026-11-05). The
-  plugin and the tools come from the code repo at the version pinned in
-  the content repo's `.brain-version`; installing the plugin never
-  downloads brain content.
+  plugin and the tools come from the code repo (latest `main`, § 2.1);
+  installing the plugin never downloads brain content.
 - **CLI tools, installed once per member** (setup guide or script):
 
   | Tool | Needed for | Who |
@@ -45,6 +44,42 @@ and the record.
   | defuddle, `slds-paper-litdownload` | manual web / paper ingest | only people who ingest by hand |
 
 - Later, if installs are a hurdle: move fetching to the server.
+
+### 2.1 Member setup (decided 2026-11-05)
+
+Designed after the first user test (`implementation-status.md` § 7):
+one command sets everything up and checks it; one command starts work.
+
+- **Everything runs the latest code** (owner): members, the content
+  repo's checks and the server worker all use the code repo's `main`.
+  No `.brain-version`, no release tags for now; pinning returns later
+  (`parked.md` K40), the marketplace install too (K41).
+- **`setup-brain`** (in the code repo, run once):
+  1. checks the prerequisites (git, gh, Claude Code, Python ≥ 3.11;
+     gitleaks optional);
+  2. asks for the login (S1): **(a)** the member's normal `gh` login, or
+     **(b)** a dedicated token for the brain (a fine-grained token
+     limited to the content repo; contents, pull requests, issues: read
+     and write; actions: read), stored in a file only the member can
+     read. "Brain login" via the GitHub App later (K39);
+  3. clones the code repo and the content repo over HTTPS, without PDFs
+     (LFS downloads skipped);
+  4. configures the content clone so that git uses the same credentials
+     as `gh` (a repo-local credential helper); nothing global changes;
+  5. writes the config (S2) `~/.config/brain/config.toml`: content repo,
+     its folder, code folder, person slug, login mode and token file,
+     search address, and the folders whose sessions are captured;
+  6. installs the command **`brain`** (`~/.local/bin/brain`);
+  7. checks the result: repo visible and writable, git fetch works,
+     Claude Code found; reports clearly what is wrong.
+- **`brain`** (start work): updates the code copy to the latest `main`,
+  sets the brain settings (and, in token mode, the token) for this
+  session only, and starts Claude Code with the brain plugin. Arguments
+  are passed to Claude Code.
+- **Captured sessions** (N6): a session is captured only if it runs in a
+  folder listed under `capture` in the config, or below it. The content
+  repo is listed by default; others are added by the member. Elsewhere
+  `brain` works, but nothing is captured and no notice is shown.
 
 ## 3. Search (Q2, Q9)
 
@@ -62,8 +97,8 @@ and the record.
 
 ## 4. The server worker (Q4, Q5)
 
-- **Polling every 5 minutes:** pull the content repo's `main`; check
-  out the code repo at the release pinned in `.brain-version`; compile
+- **Polling every 5 minutes:** pull the content repo's `main`; update
+  the code repo to the latest `main`; compile
   raw items without a summary page, one at a time and oldest first
   (03 § 3); re-index qmd. No webhook, so
   the server needs no inbound access from the internet.

@@ -10,8 +10,8 @@ cache and may be deleted.
 
 Code and content are separate repos (01 § 1): BRAIN_DIR is a clone of
 the content repo; BRAIN_CODE_DIR a clone of the code repo, which the
-worker checks out at the tag pinned in the content's `.brain-version`
-before every cycle, so CI, members and the server run the same code.
+worker updates to the latest `main` before every cycle (06 § 2.1), like
+CI and members.
 
 Environment
   BRAIN_DIR        clone of the content repo (full LFS fetch)      required
@@ -81,17 +81,11 @@ def pull() -> bool:
 
 
 def sync_code() -> bool:
-    """Check out the code repo at the tag pinned in the content's
-    .brain-version (01 § 1)."""
-    try:
-        version = (BRAIN_DIR / ".brain-version").read_text().strip()
-    except OSError:
-        log("content repo has no .brain-version")
-        return False
-    sh(["git", "fetch", "--quiet", "--tags", "origin"], CODE_DIR)
-    r = sh(["git", "checkout", "--quiet", "--detach", version], CODE_DIR)
+    """Update the code copy to the latest `main` (06 § 2.1; pinning to a
+    release later, parked K40)."""
+    r = sh(["git", "pull", "--quiet", "--ff-only", "origin", "main"], CODE_DIR)
     if r.returncode != 0:
-        log(f"cannot check out code version {version}: {r.stderr.strip()[:300]}")
+        log(f"cannot update the code: {r.stderr.strip()[:300]}")
         return False
     return True
 

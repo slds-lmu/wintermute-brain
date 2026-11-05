@@ -8,15 +8,15 @@ one per confidentiality tier (01 § 1):
 | Repo | Holds |
 |---|---|
 | `slds-lmu/wintermute-brain` (this) | tools, Claude Code plugin, server, reusable workflows, specs, tests |
-| `slds-lmu/wintermute-brain-content-slds` | `raw/`, `wiki/`, indexes, templates, `agents.txt`, the agents' `CLAUDE.md`, `.brain-version` |
+| `slds-lmu/wintermute-brain-content-slds` | `raw/`, `wiki/`, indexes, templates, `agents.txt`, the agents' `CLAUDE.md`, `scope.md` |
 
 **New here? Read [`docs/tutorial.md`](docs/tutorial.md)** — what the brain
 is, how it is built, how to use and run it.
 
-A content repo pins the code it uses in `.brain-version` (a release tag
-of this repo). Its CI calls this repo's reusable workflows at that tag;
-the server worker checks out the same tag. Upgrading = a PR in the
-content repo that changes `.brain-version` and the workflow refs.
+**Members:** run `bin/setup-brain` once, then start work with `brain`
+(06 § 2.1). For now members, the content repos' checks and the server
+worker all run this repo's latest `main`; pinning a brain to a release
+comes later (`specs/parked.md` K40).
 
 ```
 plugin/            Claude Code plugin: /brain-ingest, /brain-ask, /brain-edit, /brain-lint,

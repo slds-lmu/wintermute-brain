@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""setup-brain — set up the brain on this machine, once (06 § 2.1).
+
+Asks a few questions, clones the code and the content repo (without
+PDFs), makes git use the same login as gh for them, writes
+~/.config/brain/config.toml, installs the `brain` command and checks the
+result. Safe to run again: existing clones are kept and updated.
+
+Login modes:
+  gh     your normal `gh auth login`
+  token  a dedicated fine-grained token for the brain: owner = the
+         content repo's organisation; repositories = the content repo
+         (contents, pull requests, issues: read and write; actions: read)
+         and the code repo (contents: read)
+
+Usage:
+  setup-brain                         interactive
+  setup-brain --login token --token-file ~/.gh-tokens/brain --person jane-doe --yes
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brain_common import CODE_REPO, CONFIG, DEFAULT_REPO, expand, session_env, write_config  # noqa: E402
+
+BIN = Path("~/.local/bin").expanduser()
+
+
+def ask(question: str, default: str, yes: bool) -> str:
+    if yes:
+        return default
+    answer = input(f"{question} [{default}]: ").strip()
+    return answer or default
+
+
+def slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def run(cmd: list[str], env: dict, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+    r = subprocess.run(cmd, env=env, cwd=cwd, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        sys.exit(f"failed: {' '.join(cmd)}\n{r.stderr.strip()}")
+    return r
+
+
+def clone(repo: str, dest: Path, env: dict) -> None:
+    """HTTPS clone without LFS downloads; repo-local settings so git uses
+    gh's credentials (and with them GH_TOKEN in token mode)."""
+    url = f"https://github.com/{repo}.git"
+    helper = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
+    if (dest / ".git").exists():
+        print(f"  {dest} exists; updating")
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        run(["git", *helper, "clone", "--quiet", url, str(dest)], dict(env, GIT_LFS_SKIP_SMUDGE="1"))
+    for key, val in (("credential.helper", ""), ):
+        run(["git", "-C", str(dest), "config", "--replace-all", key, val], env)
+    run(["git", "-C", str(dest), "config", "--add", "credential.helper", "!gh auth git-credential"], env)
+    run(["git", "-C", str(dest), "config", "lfs.fetchexclude", "*"], env)       # no PDFs on members' machines
+    run(["git", "-C", str(dest), "config", "lfs.locksverify", "false"], env)    # fine-grained tokens cannot use the locks API
+    run(["git", "-C", str(dest), "pull", "--quiet", "--ff-only"], dict(env, GIT_LFS_SKIP_SMUDGE="1"), check=False)
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--login", choices=("gh", "token"))
+    ap.add_argument("--token-file", help="file with the brain token (login token)")
+    ap.add_argument("--person", help="your person slug, e.g. jane-doe")
+    ap.add_argument("--repo", default=DEFAULT_REPO, help="the content repo")
+    ap.add_argument("--dir", help="where the content repo goes (default ~/brain/<name>)")
+    ap.add_argument("--code-dir", default="~/.local/share/brain/code")
+    ap.add_argument("--search-url", default="")
+    ap.add_argument("--yes", action="store_true", help="accept defaults, no questions")
+    args = ap.parse_args(argv)
+
+    print("1. Prerequisites")
+    if sys.version_info < (3, 11):
+        sys.exit("   Python 3.11 or newer is needed.")
+    for tool in ("git", "gh", "claude"):
+        if not shutil.which(tool):
+            sys.exit(f"   {tool} not found; install it and run setup-brain again.")
+    print("   git, gh, claude, python ok" + ("" if shutil.which("gitleaks") else
+          "; gitleaks not found (optional, a built-in secret scan is used)"))
+
+    print("2. Login")
+    login = args.login or ask("   Use your normal gh login (gh) or a dedicated brain token (token)?", "gh", args.yes)
+    cfg = {"login": login, "token_file": ""}
+    if login == "token":
+        tf = args.token_file or ask("   File with the brain token (or empty to paste it)", "", args.yes)
+        if not tf:
+            tok = getpass.getpass("   Paste the token (hidden): ").strip()
+            tfp = expand("~/.config/brain/token")
+            tfp.parent.mkdir(parents=True, exist_ok=True)
+            tfp.write_text(tok + "\n")
+            tfp.chmod(0o600)
+            tf = str(tfp)
+        cfg["token_file"] = tf
+    elif run(["gh", "auth", "status"], dict(os.environ), check=False).returncode != 0:
+        sys.exit("   gh is not logged in: run `gh auth login`, then setup-brain again.")
+
+    git_name = run(["git", "config", "user.name"], dict(os.environ), check=False).stdout.strip()
+    cfg["person"] = args.person or ask("   Your person slug", slug(git_name) or "first-last", args.yes)
+    cfg["repo"] = args.repo
+    cfg["dir"] = args.dir or f"~/brain/{args.repo.split('/')[-1]}"
+    cfg["code_dir"] = args.code_dir
+    cfg["search_url"] = args.search_url
+    cfg["capture"] = [cfg["dir"]]
+    env = session_env(cfg)
+
+    print("3. Access")
+    for repo, need in ((cfg["repo"], "push"), (CODE_REPO, "pull")):
+        r = run(["gh", "api", f"repos/{repo}", "--jq", f".permissions.{need}"], env, check=False)
+        if r.stdout.strip() != "true":
+            sys.exit(f"   no {need} access to {repo} with this login. "
+                     + ("Give the token access to it (see setup-brain --help)." if login == "token"
+                        else "Ask an admin for access, or use a brain token."))
+        print(f"   {repo}: {need} ok")
+
+    print("4. Clones (no PDFs)")
+    clone(CODE_REPO, expand(cfg["code_dir"]), env)
+    clone(cfg["repo"], expand(cfg["dir"]), env)
+    print(f"   code:    {expand(cfg['code_dir'])}\n   content: {expand(cfg['dir'])}")
+
+    print("5. Config")
+    write_config(cfg)
+    print(f"   {CONFIG}")
+
+    print("6. The `brain` command")
+    BIN.mkdir(parents=True, exist_ok=True)
+    link = BIN / "brain"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(expand(cfg["code_dir"]) / "bin" / "brain")
+    on_path = str(BIN) in os.environ.get("PATH", "").split(os.pathsep)
+    print(f"   {link}" + ("" if on_path else f"\n   note: {BIN} is not on your PATH; add it in your shell profile"))
+
+    print("7. Check")
+    r = subprocess.run([sys.executable, str(expand(cfg["code_dir"]) / "bin" / "brain"), "--check"],
+                       env=dict(os.environ, BRAIN_CONFIG=str(CONFIG)))
+    if r.returncode == 0:
+        print(f"\nDone. Start work with `brain` (sessions in {cfg['dir']} are captured;"
+              f" add more folders under `capture` in {CONFIG}).")
+    return r.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

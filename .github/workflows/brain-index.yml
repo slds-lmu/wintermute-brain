@@ -1,10 +1,10 @@
 # Reusable index Action for a brain content repo (01 § 7, 03 § 2.1),
-# called on every push to the content repo's main at a pinned release tag:
+# called on every push to the content repo's main (at `main` for now):
 #   jobs:
 #     index:
 #       if: github.event.head_commit.author.email != 'brain-agent-index@agents.invalid'
-#       uses: slds-lmu/wintermute-brain/.github/workflows/brain-index.yml@v0.1.0
-#       with: { code-ref: v0.1.0 }
+#       uses: slds-lmu/wintermute-brain/.github/workflows/brain-index.yml@main
+#       with: { code-ref: main }
 #       secrets: inherit
 # Regenerates the index files and applies the safe link fix. Indexes are
 # never part of PRs, so this is their single writer. Commits as

@@ -539,7 +539,8 @@ class SessionNoticeTest(unittest.TestCase):
     def test_session_start_shows_capture_notice(self):
         # 06 § 7a PD3: a visible one-line notice at every session start
         with tempfile.TemporaryDirectory() as tmp:
-            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_REPO="slds-lmu/test-content")
+            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_REPO="slds-lmu/test-content",
+                       BRAIN_CAPTURE=tmp)
             payload = json.dumps({"session_id": "s1", "transcript_path": "/nonexistent", "cwd": tmp})
             r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
                                input=payload, capture_output=True, text=True, env=env)
@@ -550,6 +551,63 @@ class SessionNoticeTest(unittest.TestCase):
             r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
                                input=payload, capture_output=True, text=True, env=env)
             self.assertEqual(r.stdout.strip(), "")
+
+
+class CaptureScopeTest(unittest.TestCase):
+    def test_only_listed_folders_are_captured(self):
+        # user test N6: with --plugin-dir every session was captured
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bs", ROOT / "plugin" / "scripts" / "brain_session.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Path(tmp) / "brain"
+            (brain / "sub").mkdir(parents=True)
+            other = Path(tmp) / "other"
+            other.mkdir()
+            os.environ["BRAIN_CAPTURE"] = str(brain)
+            try:
+                self.assertTrue(mod.captured(str(brain)))
+                self.assertTrue(mod.captured(str(brain / "sub")))
+                self.assertFalse(mod.captured(str(other)))
+                os.environ["BRAIN_CAPTURE"] = ""
+                self.assertFalse(mod.captured(str(brain)))
+            finally:
+                os.environ.pop("BRAIN_CAPTURE", None)
+
+    def test_hook_silent_outside_captured_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_CAPTURE="")
+            payload = json.dumps({"session_id": "s1", "transcript_path": "/nonexistent", "cwd": tmp})
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            self.assertEqual(r.stdout.strip(), "")
+
+
+class BrainConfigTest(unittest.TestCase):
+    def test_config_roundtrip_and_session_env(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bc", ROOT / "bin" / "brain_common.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            tok = Path(tmp) / "token"
+            tok.write_text("secret-token\n")
+            cfg = {"person": "jane-doe", "repo": "org/content", "dir": f"{tmp}/content",
+                   "code_dir": f"{tmp}/code", "login": "token", "token_file": str(tok),
+                   "search_url": "", "capture": [f"{tmp}/content", f"{tmp}/proj"]}
+            path = Path(tmp) / "config.toml"
+            mod.write_config(cfg, path)
+            self.assertEqual(oct(path.stat().st_mode)[-3:], "600")
+            loaded = mod.load_config(path)
+            self.assertEqual(loaded, cfg)
+            env = mod.session_env(loaded, base={})
+            self.assertEqual(env["BRAIN_REPO"], "org/content")
+            self.assertEqual(env["BRAIN_PERSON"], "jane-doe")
+            self.assertEqual(env["GH_TOKEN"], "secret-token")
+            self.assertEqual(env["BRAIN_CAPTURE"].split(os.pathsep), [f"{tmp}/content", f"{tmp}/proj"])
+            loaded["login"] = "gh"
+            self.assertNotIn("GH_TOKEN", mod.session_env(loaded, base={}))
 
 
 class DigestPiecesTest(unittest.TestCase):

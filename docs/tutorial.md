@@ -58,11 +58,10 @@ basis of a newer source, and may not touch a page marked `locked: true`.
 | **Code** (`wintermute-brain`) | tools, Claude Code plugin, server worker, reusable checks, specs, tests | developers |
 | **Content** (one per brain, e.g. per team or confidentiality level) | sources, pages, schema, scope, settings | agents and members |
 
-One code base serves any number of brains. Each content repo pins a code
-release in `.brain-version`; its checks, server worker and members'
-plugin all run that release, and upgrading is a one-line change in the
-content repo. Development work on the code is never captured as brain
-content.
+One code base serves any number of brains. For now every brain's checks,
+server worker and members run the code's latest version; pinning a brain
+to a release is planned. Development work on the code is never captured
+as brain content.
 
 ### Components
 
@@ -126,22 +125,21 @@ time, oldest first.
 ## 4. Installing
 
 Reading a brain needs nothing but access to its content repo (section
-5). Asking, adding and editing need the plugin:
+5). Asking, adding and editing need the setup:
 
-1. **Prerequisites:** git, the GitHub CLI `gh` (logged in, with write
-   access to the content repo), Claude Code, Python 3 with PyYAML, and
-   gitleaks for the secret scan.
-2. **Get the brain:** clone the content repo, without downloading large
-   files (PDFs stay on the server).
-3. **Get the plugin** at the release the brain pins in `.brain-version`,
-   and start Claude Code with it.
-4. **Configure:** tell the plugin which brain to use (the content repo
-   and your clone of it) and who you are (your person slug, used in
-   commit records).
-5. **Check:** ask a question with `/brain-ask`; the answer should cite
-   pages of the brain.
+1. **Prerequisites:** git, the GitHub CLI `gh`, Claude Code and
+   Python 3.11 or newer; gitleaks is optional.
+2. **Run `setup-brain` once.** It asks how to log in to GitHub (your
+   normal `gh` login, or a dedicated token for the brain) and who you
+   are, clones the brain without large files, makes git use the same
+   login, writes your settings to `~/.config/brain/config.toml`,
+   installs the `brain` command, and checks that everything works.
+3. **Start work with `brain`** instead of `claude`. It updates the code,
+   loads the brain plugin and your settings for this session.
 
-The content repo's README has the exact commands for that brain.
+Sessions are captured only in folders listed under `capture` in your
+settings; by default that is the brain's own folder. The content repo's
+README has the exact commands.
 
 ## 5. Reading
 

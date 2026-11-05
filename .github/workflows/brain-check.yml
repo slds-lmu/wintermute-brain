@@ -1,12 +1,11 @@
-# Reusable required check for a brain content repo (03 § 2.1), called by
-# the content repo at a pinned release tag of this code repo (01 § 1):
+# Reusable required check for a brain content repo (03 § 2.1). For now
+# every content repo calls it at `main` (06 § 2.1; pinning later, K40):
 #   jobs:
 #     check:
-#       uses: slds-lmu/wintermute-brain/.github/workflows/brain-check.yml@v0.1.0
-#       with: { code-ref: v0.1.0 }
+#       uses: slds-lmu/wintermute-brain/.github/workflows/brain-check.yml@main
+#       with: { code-ref: main }
 #       secrets: inherit
 # Runs on every PR and every push to main of the content repo:
-#   - `.brain-version` must equal the code version used here;
 #   - mechanical lint with the lock and human-line rules for agent
 #     commits (author listed in agents.txt);
 #   - commit-op preconditions (PRs): files changed in the PR are
@@ -18,7 +17,7 @@ on:
   workflow_call:
     inputs:
       code-ref:
-        description: release tag of slds-lmu/wintermute-brain (must equal .brain-version)
+        description: ref of slds-lmu/wintermute-brain to run (main for now)
         required: true
         type: string
     secrets:
@@ -63,13 +62,6 @@ jobs:
           # Pinned gitleaks release; bump deliberately.
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
             | tar -xz -C /usr/local/bin gitleaks
-
-      - name: Pinned code version
-        working-directory: content
-        run: |
-          PINNED=$(tr -d ' \n' < .brain-version)
-          [ "$PINNED" = "${{ inputs.code-ref }}" ] || {
-            echo ".brain-version is '$PINNED' but the workflow calls code-ref '${{ inputs.code-ref }}'; keep them equal"; exit 1; }
 
       - name: Determine base, head and author kind
         id: meta
