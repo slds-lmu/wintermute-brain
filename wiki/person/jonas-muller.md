@@ -1,7 +1,7 @@
 ---
 type: person
 title: "Jonas Müller"
-description: "PhD candidate, FAU MaD Lab (since 11/2023): radar and vision human pose estimation; PreHapp, EmpkinS."
+description: "PhD candidate, FAU MaD Lab: radar and vision human pose estimation; PreHapp, EmpkinS."
 tags: [fau, pose-estimation, radar, computer-vision]
 aliases: [Jonas Mueller, Jonas Muller]
 ---
@@ -11,8 +11,11 @@ aliases: [Jonas Mueller, Jonas Muller]
 PhD candidate at the Machine Learning and Data Analytics Lab (Lehrstuhl für
 Maschinelles Lernen und Datenanalytik), Department Artificial Intelligence in
 Biomedical Engineering (AIBE), Friedrich-Alexander-Universität
-Erlangen-Nürnberg (FAU), since 11/2023
+Erlangen-Nürnberg (FAU)
 [Jonas Müller profile](/wiki/source/src-20261105-jonas-muller-fau-profile.md).
+
+> **Status: Disputed**
+> The FAU profile lists him as PhD candidate since 11/2023 [Jonas Müller profile](/wiki/source/src-20261105-jonas-muller-fau-profile.md); a note by Jan Petermann says he started his PhD in 01/2022 [PhD start note](/wiki/source/src-20261105-jonas-muller-phd-start-note.md).
 
 ## Works on
 
