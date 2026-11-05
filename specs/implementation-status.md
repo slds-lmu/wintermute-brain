@@ -224,3 +224,8 @@ Problems found and how they were handled:
     approaches, Open questions), ~2 min each; index Action via the App.
     The finding above propagated: the assistant's sign test (p ≈ 0.11)
     now stands under "Results" as a project result.
+- **Erasure tool** (06 § 7a, PD2; 2026-11-05): `admin/erase` + runbook
+  `admin/README.md`. Tested: refuses non-admins, refuses the code repo,
+  dry run reports and changes nothing, not shipped with the plugin.
+  **Not tested:** the actual rewrite and force-push (needs
+  git-filter-repo, not installed in the test environment).

@@ -546,5 +546,52 @@ class DigestPiecesTest(unittest.TestCase):
         self.assertEqual(mod.pieces(records, 1, 10, turns=20), [(1, 10)])
 
 
+
+# --- admin/erase: safety (06 § 7a, PD2) ------------------------------------------
+
+class EraseSafetyTest(unittest.TestCase):
+    """The erasure tool must refuse non-admins, default to a dry run and
+    never touch the code repo. The rewrite itself needs git-filter-repo."""
+
+    ERASE = ROOT / "admin" / "erase"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = copy_fixture(Path(self.tmp.name) / "brain")
+        init_repo(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def erase(self, *args, env=None):
+        return run([PY, str(self.ERASE), *args], cwd=self.root, env=env)
+
+    def test_not_shipped_with_plugin(self):
+        self.assertFalse((ROOT / "plugin" / "tools" / "erase").exists())
+
+    def test_refuses_non_admin(self):
+        # a fake gh that reports no admin permission
+        fake = Path(self.tmp.name) / "bin"
+        fake.mkdir()
+        (fake / "gh").write_text("#!/bin/sh\necho false\n")
+        (fake / "gh").chmod(0o755)
+        r = self.erase("--repo", "slds-lmu/x", "--path", "raw/", env={"PATH": f"{fake}:{os.environ['PATH']}"})
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not an admin", r.stdout)
+
+    def test_refuses_code_repo(self):
+        r = self.erase("--repo", "slds-lmu/wintermute-brain", "--path", "raw/", "--skip-admin-check")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_dry_run_reports_and_changes_nothing(self):
+        before = git(["rev-parse", "HEAD"], self.root).stdout
+        r = self.erase("--repo", str(self.root), "--path", "raw/web/", "--skip-admin-check",
+                       "--workdir", str(Path(self.tmp.name) / "work"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("DRY RUN", r.stdout)
+        self.assertIn("raw/web/2026/src-20261029-denser-llm-wiki-survey/page.md", r.stdout)
+        self.assertEqual(git(["rev-parse", "HEAD"], self.root).stdout, before)
+
+
 if __name__ == "__main__":
     unittest.main()

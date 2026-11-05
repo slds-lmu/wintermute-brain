@@ -265,6 +265,39 @@ health"**, in each content repo:
 Reports are not stored as files in the repo; they are neither `raw/`
 nor `wiki/`. Later: mirror them to Mattermost (`parked.md` K29).
 
+### 5.4 Resolving disputes (K17, decided 2026-11-05)
+
+A `Status: Disputed` block (01 § 6) records a real disagreement between
+sources. It is visible on purpose, so it needs a path to resolution, or
+blocks pile up. Proposal:
+
+1. **Noticed:** lint lists every open block with its age (from git: when
+   the block was written), always as info, never escalated (D3).
+   Nobody specific is responsible (D1); whoever follows the "Brain
+   health" report picks disputes up.
+2. **Resolved by a human**, in one of two ways:
+   - edit the page: keep the claim that holds, with its citation, and
+     remove the block; or
+   - ask an agent: `/brain-edit resolve the dispute on <page>: <which
+     claim holds and why>`.
+3. **Agents resolve only clear cases** (D2): when a newer source
+   *explicitly* corrects or replaces an older one (an erratum, a
+   retraction, the final version of a preprint), the agent that ingests
+   it resolves the block itself: it keeps the corrected claim and states
+   the reason in the commit (`Reasons: page/x: dispute resolved, B is
+   the published version of preprint A`). In every other case it only
+   proposes a resolution, as a lint report line, never as an edit.
+4. **Recorded in git:** the commit that removes a block gives the
+   resolution as its reason (`Reasons: page/x: dispute resolved, B holds
+   because …`). No extra field or file; the page shows the current
+   state, history shows how it was settled.
+
+| # | Question | Recommendation |
+|---|---|---|
+| D1 | Who is responsible for an open dispute? | **decided (owner, 2026-11-05): nobody specific for now**; open disputes appear in the "Brain health" report and anyone may resolve them. Blocks are mostly written by agents, so "whoever raised it" would name a random person. Later, with Mattermost pings (K29): ping the people who brought in the two conflicting sources and the people linked on the page |
+| D2 | May an agent resolve a dispute on its own? | **decided (owner, 2026-11-05): only in clear cases**: a newer source explicitly corrects or replaces the old one (erratum, retraction, final version of a preprint); otherwise it only proposes |
+| D3 | Does an old dispute become a warning? | **decided (owner, 2026-11-05): never**; open disputes stay info and are listed with their age |
+
 ## 6. Commit messages
 
 Extends 01 § 8. One commit per operation:

@@ -104,6 +104,53 @@ and the record.
   outside GitHub, e.g. on the server, whose disk is covered by the
   university backup.
 
+## 7a. Personal data (K27) — **draft, open questions PD1–PD4**
+
+Not a legal opinion. The brain processes personal data: person pages,
+names in digests and pages, later meeting transcripts, chat and mail.
+Git makes this harder than in a normal wiki: everything stays in the
+history, in LFS, in backups and in every member's clone.
+
+**What already limits it** (decided earlier):
+
+- `person` pages hold only role, projects and expertise (01 § 5.2);
+  evaluations and personnel matters belong to the owner tier.
+- Session digests never keep personal remarks or personal machine setup
+  (02 § 2.3); transcripts themselves are never stored, only digests.
+- `scope.md` lists private life as out of scope; such sources are
+  flagged (01 § 2.1).
+- Secrets are stripped before anything is written (R15).
+
+**Proposal:**
+
+1. **Minimise at the door.** Do not ingest special categories (health,
+   religion, union membership, …), evaluations of people, or private
+   communication between individuals. Prefer digests over full
+   transcripts for any new channel (meetings, chat, mail).
+2. **Inform and opt out.** Members are told what the brain captures
+   (tutorial, README): which repos opt in to session digests, that
+   digests keep decisions and findings with names, and how to switch
+   capture off per session. Anyone can ask to be removed.
+3. **Removal on request**, in two steps: first remove the content from
+   the current pages (an `edit`, immediately); then, if the person asks
+   for erasure, remove it from the history too (rewrite the content
+   repo's history, purge LFS objects, ask everyone to re-clone, re-clone
+   on the server). The second step is disruptive and **admin-only**
+   (PD2): the tool `admin/erase` in the code repo (not shipped with the
+   plugin) checks admin rights, defaults to a dry run, needs the repo
+   name typed to execute, writes a backup bundle first, and its
+   force-push only passes the ruleset for admins. Runbook:
+   `admin/README.md` (including GitHub Support for PR refs and LFS).
+4. **Data protection officer:** the owner has already consulted the
+   LMU data protection officer (2026-11-05); no further step planned.
+
+| # | Question | Recommendation |
+|---|---|---|
+| PD1 | Involve the LMU data protection officer, and when? | **decided (owner, 2026-11-05): no further step; the owner has already talked to him** |
+| PD2 | Erasure requests: rewrite git history, or only remove from current pages? | **decided (owner, 2026-11-05): rewrite history, admin-only** via `admin/erase` and its runbook; members and agents cannot do it |
+| PD3 | How are members informed and how do they opt out? | **notice in tutorial and README**; capture off per session; removal on request |
+| PD4 | What is never ingested? | **special categories, evaluations of people, private communication** between individuals |
+
 ## 8. Still open
 
 - Who administers the server worker and the API key.

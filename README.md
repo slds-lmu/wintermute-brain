@@ -23,6 +23,7 @@ plugin/            Claude Code plugin: /brain-ingest, /brain-ask, /brain-edit, /
                    brain skill, session-digest hooks, qmd MCP config
 plugin/tools/      index, lint, check_evidence, start-op, commit-op, log, report-health
 server/            compile worker, qmd auth proxy, GitHub App token, systemd units
+admin/             admin-only tools (erasure of personal data from history); not in the plugin
 .github/workflows/ check.yml (tests of this repo); brain-check.yml and brain-index.yml
                    (reusable, called by content repos)
 tests/             fixture wiki, one broken copy per lint rule, git-flow tests
