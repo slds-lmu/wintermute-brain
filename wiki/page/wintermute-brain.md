@@ -74,6 +74,16 @@ Shared Obsidian settings: the repo ships `.obsidian/app.json` with `useMarkdownL
 
 A fine-grained PAT has one resource owner, so each owner needs its own token. Tokens live in `~/.gh-tokens/<name>` and are mounted read-only into yolobox; `ghr <name> …` and `gitr <name> …` run `gh` or `git` with that token. For this repo a token needs Actions read; `slds-write` is scoped to this repo [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
 
+## Page types, locks and lint
+
+Page types exist only where membership can't be disputed: `person`, `meeting`, `paper`, `grant`, `source`. Everything else is an untyped `page`, and projects and courses are tags; the owner rejected a `synthesis` type, wanting no ontology that grows into team debates [Spec decisions digest](/wiki/source/src-20261105-wintermute-brain-wiki-spec-decisions-minimal-pa-98411f.md).
+
+A `locked: true` field is the emergency brake. `tools/commit-op` rejects commits that touch locked pages or overwrite lines last written by a human, unless the commit message names a newer source (`Overrides-human:`). The same checks also run as a required GitHub check before anything lands on `main`, because local hooks can be skipped. The `audit/` inbox is parked as K18 [Spec decisions digest](/wiki/source/src-20261105-wintermute-brain-wiki-spec-decisions-minimal-pa-98411f.md).
+
+Lint has two layers: mechanical checks on every push, and AI judgment checks (stale claims, duplicates, uncited claims, sentence-to-source mismatch) run by hand in the MVP that only report. The owner chose our own validator over IWE, to be revisited if the script starts duplicating it (K19). Search uses qmd from the MVP on, with grep as fallback [Spec decisions digest](/wiki/source/src-20261105-wintermute-brain-wiki-spec-decisions-minimal-pa-98411f.md).
+
+Spec batches 1–4 (concurrency, ingest, lint, query) are accepted; batch 5 is proposed but not approved, and the owner must still talk to the `slds-setup-memory` authors (F4). Priority K17, the workflow for resolving visible disputes, is open: who is notified, how a human resolves one, whether an agent may propose a resolution, how it is recorded, and a lint report for old disputes [Spec decisions digest](/wiki/source/src-20261105-wintermute-brain-wiki-spec-decisions-minimal-pa-98411f.md).
+
 ## Open checks
 
 Who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open (handed to Marc): qmd at scale and the PDF converter benchmark (the Obsidian link check passed) [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md). Still open: qmd keyword search from the start versus grep-only wording, and cleanup of stale spec text [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
