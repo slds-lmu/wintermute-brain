@@ -190,3 +190,35 @@ Problems found and how they were handled:
   2026-11-05); open code PRs (closed as outdated; authors may redo them) from before
   the split (#29 containers, #31 check/digest fixes) need a rebase onto
   the new layout; members re-point clones and `BRAIN_REPO`.
+- **Live hook test on the split layout** (2026-11-05): a scratch project
+  with the plugin loaded via `--plugin-dir`, a short real `claude -p`
+  conversation (threshold lowered with `BRAIN_DIGEST_TURNS=2`), content
+  repo `wintermute-brain-content-slds` as target.
+  - **Bug, fixed:** `brain-session.sh` redirected its log into
+    `~/.cache/brain/` without creating it, so on a fresh machine the
+    hook silently never ran. Now `mkdir -p` first (needs a release).
+  - **Passed:** Stop hook triggers after 2 messages and digests in the
+    background (content PR #2); a second hook call during the run
+    spawns nothing (pending flag); the SessionEnd flush digests a tail
+    of 3 messages (PR #3); checkpoint advances (1–4, 5–13); the compile
+    queue comes out oldest first on real data.
+  - **Not exercised:** the catch-up at SessionStart (the end flush got
+    there first; same code path).
+  - **FIXED (2026-11-05, rule "mark it"):** digest prompt, 02 § 2.3,
+    compile prompt and skill keep assistant contributions marked, never
+    in titles, Decisions or Results. Was: **Finding:** digests record the assistant's own contributions
+    as group results. PR #3 states "the 8-of-11 win count is not
+    significant: a two-sided sign test gives p ≈ 0.11", a calculation
+    Claude made, and puts "gap not significant" in the title. Rule to
+    add to the digest prompt: mark everything the assistant contributed
+    (calculations, advice, judgments) as such, or leave it out (00 § 8,
+    guesses hardening into facts).
+  - Minor: without a git remote, `repo:` in `source.yaml` is a local
+    path.
+  - **Compile worker on the split layout passed:** a fresh content clone
+    plus a separate code clone; the worker checked out `v0.1.1` from
+    `.brain-version` by itself and compiled both digests oldest first
+    into `wiki/page/demo-project.md` (Decisions, Status, Results, Failed
+    approaches, Open questions), ~2 min each; index Action via the App.
+    The finding above propagated: the assistant's sign test (p ≈ 0.11)
+    now stands under "Results" as a project result.

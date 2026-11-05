@@ -198,6 +198,9 @@ disagreement between sources keeps both claims under the claim:
 > A reports 92% [A](/wiki/paper/a.md); B reports 85% on the same benchmark [B](/wiki/paper/b.md).
 ```
 
+- **The assistant's contributions stay marked:** content a source marks as
+  the assistant's calculation, suggestion or judgment (session digests)
+  never becomes a plain fact, decision or result on a page; keep the mark.
 - **Research topics:** also record the opposing side found in the sources at
   hand (failures, criticism, failed replications).
 - **Failed ideas:** a page tagged `idea` that records an abandoned or failed

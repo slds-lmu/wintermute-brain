@@ -12,6 +12,11 @@ citations, check, commit). Do not fetch anything and never write to raw/.
   main cascade target. "Keep nothing by default" already happened on the
   member's machine, so what is in the digest is worth a page update, but
   skip anything that merely restates existing wiki pages.
+- Keep the digest's marks on the assistant's contributions ("the
+  assistant's calculation", "suggestion"): such items never become plain
+  facts or results on a page. Put them with their mark, e.g. under an
+  "Assistant notes (unconfirmed)" line or sentence, and never under
+  Decisions or Results unless the digest says the user adopted them.
 - `--invoked-by` is the `person` (session) or `ingested_by` (other
   channels) field of `source.yaml`; `--agent brain-agent-compile`.
 - The tools are in `$BRAIN_TOOLS` (set by the worker). Commit with

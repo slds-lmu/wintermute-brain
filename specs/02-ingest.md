@@ -76,6 +76,13 @@ its own**.
   without a lesson, personal remarks, secrets, and **personal machine or
   tool setup** (someone's tokens, sandbox, shell, editor configuration;
   2026-11-05). Group conventions for tools stay.
+- **Mark the assistant's contributions** (owner, 2026-11-05). Only
+  what the human said, decided or reported counts as the group's.
+  Anything the assistant added on its own (calculations, tests,
+  analyses, advice, judgments) is kept only if useful and always marked
+  as such on its line ("the assistant's calculation, not checked by the
+  group"); never in the title. Live test: an unmarked sign test computed
+  by the assistant ended up as a project "result".
 - **Never re-ingest the wiki.** Anything that merely restates brain
   pages (e.g. an answer the agent built from the wiki) is skipped;
   only what is new in the conversation is kept: information the human
