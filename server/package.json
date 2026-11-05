@@ -1,0 +1,15 @@
+{
+  "name": "wintermute-brain-server",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@tobilu/qmd": "2.8.3",
+    "sqlite-vec-linux-x64": "0.1.9"
+  },
+  "overrides": {
+    "@modelcontextprotocol/server": "2.3.0",
+    "zod": "4.6.6",
+    "simple-git": "4.0.2",
+    "@simple-git/argv-parser": "2.0.1"
+  }
+}

@@ -1,4 +1,4 @@
-# 06 — Operations
+# 06 - Operations
 
 Status: **accepted** (owner, 2026-11-05; implemented, see `implementation-status.md`)
 Owner: Bernd Bischl
@@ -107,13 +107,13 @@ and the record.
 ### 8.1 GitHub usage (checked 2026-11-05 via the billing API)
 
 `slds-lmu` is on the **Team** plan (307 seats, 182 used). Usage across
-the whole org, Jan–Nov 2026:
+the whole org, Jan-Nov 2026:
 
 | | Typical month | Peak | Billed |
 |---|---|---|---|
-| Actions (all runners) | ~600–1,000 min | 3,217 min (May) | $0 except $4.26 (July) |
-| Git LFS storage | ~5 GB (≈ 3,800 GB-hours) | — | $0 |
-| Git LFS bandwidth | ~0.1 GB | — | $0 |
+| Actions (all runners) | ~600-1,000 min | 3,217 min (May) | $0 except $4.26 (July) |
+| Git LFS storage | ~5 GB (approximately 3,800 GB-hours) | - | $0 |
+| Git LFS bandwidth | ~0.1 GB | - | $0 |
 
 So today's use is inside the included amounts. The exact included
 quotas are not in the API; check the billing page before scaling up.
@@ -121,8 +121,35 @@ quotas are not in the API; check the billing page before scaling up.
 **Expected brain load:** each agent operation costs about two short
 Actions runs (the PR check, then the index Action after merge). With
 automatic session digests plus their compile PRs, that could be about
-1,000–2,000 extra minutes a month at group scale [estimate], which
+1,000-2,000 extra minutes a month at group scale [estimate], which
 could push the org past its included minutes. PDFs add a few GB of LFS
 per thousand papers. **Watch the Actions minutes once session digests
 run;** options then are a cheaper check (skip the index Action for
 raw-only PRs) or a self-hosted runner on the group server.
+
+## 9. Container deployment
+
+The GPU deployment uses a shared application image for the compile worker
+and authenticated search gateway. The code repository owns the Dockerfile
+and server-image workflow. The VM operations repository owns Compose,
+Ansible, Caddy, secrets, host paths, and the immutable image pin. Review
+branches may publish a pinned image without merging their PR.
+
+The content clone is wintermute-brain-content-slds. The worker checks out
+the code tag named by its .brain-version before invoking plugin/tools and
+the compile plugin. Service infrastructure runs from the pinned container
+image. Updating the service image does not change the content's tool pin.
+
+qmd models remain resident until another GPU caller requests the shared
+lock. Search drains active requests, stops qmd, waits for process exit,
+and yields the GPU. Queue and running-job checks keep qmd unloaded across
+a MinerU batch; it reloads after a short idle interval. Whisper HTTP stays
+resident. The index and models are local persistent mounts outside images.
+
+Members use personal GitHub tokens with read access to the content repo.
+The compile worker uses a separate internal service credential for MCP.
+Only the public MCP and health routes are exposed by Caddy. The GitHub
+App is installed on the code and content repos; git and gh renew their
+installation tokens without periodic worker restarts.
+
+Operational details and validation commands are in server/README.md.

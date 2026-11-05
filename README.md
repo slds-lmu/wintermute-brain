@@ -1,4 +1,4 @@
-# wintermute-brain — code of the SLDS brain
+# wintermute-brain - code of the SLDS brain
 
 The SLDS brain is an LLM-maintained group wiki: immutable raw sources,
 agent-written Markdown pages, git as the log and the provenance. **This
@@ -19,11 +19,12 @@ content repo that changes `.brain-version` and the workflow refs.
 plugin/            Claude Code plugin: /brain-ingest, /brain-ask, /brain-edit, /brain-lint,
                    brain skill, session-digest hooks, qmd MCP config
 plugin/tools/      index, lint, check_evidence, start-op, commit-op, log, report-health
-server/            compile worker, qmd auth proxy, GitHub App token, systemd units
+server/            container runtime, qmd gateway and GPU coordinator, compile worker, credential helpers
 .github/workflows/ check.yml (tests of this repo); brain-check.yml and brain-index.yml
                    (reusable, called by content repos)
+                   server-image.yml (immutable GHCR builds for server deployment)
 tests/             fixture wiki, one broken copy per lint rule, git-flow tests
-specs/             the design (00–06), prior art, parked ideas, implementation status
+specs/             the design (00-06), prior art, parked ideas, implementation status
 ```
 
 ## Tools
@@ -37,7 +38,7 @@ $T/index                       # regenerate all index files (--check to verify)
 $T/lint [--fix] [--base REV] [--agent NAME]   # mechanical lint (03 § 5.1)
 $T/check_evidence [pages]      # grounding (--queue: compile backlog, oldest first)
 $T/start-op --agent NAME       # fresh worktree for one operation
-$T/commit-op …                 # the agents' only write path: lint, preconditions, PR with auto-merge
+$T/commit-op ...                 # the agents' only write path: lint, preconditions, PR with auto-merge
 $T/log [--op ingest]           # readable digest of the git log
 python3 -m unittest discover -s tests   # in this repo
 ```

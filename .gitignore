@@ -12,3 +12,4 @@ __pycache__/
 .pytest_cache/
 # Staging folders used during ingest fetches.
 .staging/
+server/node_modules/
