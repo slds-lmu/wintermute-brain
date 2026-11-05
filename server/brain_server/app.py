@@ -164,14 +164,14 @@ def create_app(runtime=None, access=None) -> FastAPI:
         try:
             await admission.__aenter__()
             entered = True
+            if listener:
+                await admission.__aexit__(None, None, None)
+                entered = False
             upstream_request = app.state.qmd.build_request(
                 request.method, app.state.runtime.upstream + "/mcp",
                 content=bytes(body), headers=headers,
             )
             response = await app.state.qmd.send(upstream_request, stream=True)
-            if listener:
-                await admission.__aexit__(None, None, None)
-                entered = False
             result = McpResponse(response, admission if entered else None)
             entered = False
             return result

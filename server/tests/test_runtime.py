@@ -293,7 +293,16 @@ def test_gateway_streams_before_eof_and_releases_admission_on_disconnect(method,
         app = create_app(runtime=runtime, access=Access())
         disconnect = asyncio.Event()
         first_chunk = asyncio.Event()
+        upstream_started = asyncio.Event()
+        release_headers = asyncio.Event()
         received = False
+
+        async def qmd(request):
+            upstream_started.set()
+            await release_headers.wait()
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=stream,
+            )
 
         async def receive():
             nonlocal received
@@ -315,18 +324,20 @@ def test_gateway_streams_before_eof_and_releases_admission_on_disconnect(method,
             "client": ("127.0.0.1", 1), "server": ("test", 80),
         }
         async with app.router.lifespan_context(app), httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda request: httpx.Response(
-                200, headers={"Content-Type": "text/event-stream"}, stream=stream,
-            )),
+            transport=httpx.MockTransport(qmd),
         ) as upstream:
             app.state.qmd = upstream
             request = asyncio.create_task(app(scope, receive, send))
             try:
+                await asyncio.wait_for(upstream_started.wait(), 1)
+                assert runtime.active == active
+                release_headers.set()
                 await asyncio.wait_for(first_chunk.wait(), 1)
                 assert not request.done()
                 assert runtime.active == active
                 assert not stream.closed
             finally:
+                release_headers.set()
                 disconnect.set()
                 await asyncio.wait_for(request, 1)
             assert stream.closed

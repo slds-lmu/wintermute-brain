@@ -72,6 +72,8 @@ connections when clients disconnect. GET and subscriptions/listen streams
 do not count as active GPU operations; an idle notification listener must
 not block indexing or model unloading. Ordinary calls retain admission
 until their response finishes.
+Listeners release admission before waiting for upstream headers: the
+upstream can defer those headers until its first notification.
 
 ## CONFIGURATION
 
