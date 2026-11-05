@@ -1,86 +1,70 @@
 # wintermute-brain — tutorial
 
-wintermute-brain is software for a **team brain**: a shared, LLM-maintained
-knowledge base for a team, lab or organisation. This tutorial explains it
-top down: what it is, the ideas behind it, how it is built, how to use it,
-and how to run it. Exact commands and settings live in the READMEs and in
-`specs/`; this text explains the concepts.
+wintermute-brain is software for a **team brain**: a knowledge base that
+LLM agents write and maintain for a team, lab or organisation. Commands
+and settings are in the READMEs; the full design is in `specs/`.
 
-## 1. What it is
+## 1. What a brain is
 
-A brain is a team's **long-term memory**: a wiki of plain Markdown pages
-about the team's work (projects, people, decisions, results, how things
-are done). What makes it different is who writes it. **Agents** (Claude)
-do the filing, summarising and cross-linking; **humans** choose what goes
-in, ask questions, correct and steer.
+A brain is a wiki of plain Markdown pages about a team's projects,
+people, decisions and results. Agents (Claude) file, summarise and
+cross-link; people choose the input, ask, correct and steer.
 
-Typical questions a brain should answer:
+It answers questions about the team's work, such as the state of a
+project, what was decided and why, what the sources say on a topic, or
+how things are done, each answer with citations.
 
-- *Status:* "Where do we stand with project X? Who works on it?"
-- *Synthesis:* "What do our sources say about topic Y? With citations."
-- *Decisions:* "What did we decide about Z, and why?"
-- *Onboarding:* "How do things work here, and whom do I ask?"
-
-The pattern goes back to Karpathy's "LLM wiki": instead of searching raw
-documents for every question, an agent **compiles** them once into
-maintained pages, and later questions are answered from those pages.
-wintermute-brain adds what a team needs on top: many writers at once,
-automatic capture of knowledge from everyday work, review gates, and
-traceability for every sentence.
+The approach follows Karpathy's "LLM wiki": sources are compiled once
+into maintained pages, and questions are answered from those pages
+rather than from the raw documents. wintermute-brain adds concurrent
+writers, automatic capture of knowledge from work sessions, a review
+gate on every change, and a citation behind every claim.
 
 ## 2. Core ideas
 
-**Two layers of content.**
+**Two layers.** `raw/` holds the sources exactly as they arrived (a web
+page, a paper, a session digest) and is never edited. `wiki/` holds the
+pages written from them; every non-trivial claim links to the summary
+page of its source.
 
-- `raw/`: the sources, exactly as they came in (a web page, a paper, a
-  digest of a work session). Written once, never changed.
-- `wiki/`: the pages the agents write from them. Every non-trivial claim
-  links to the summary page of its source, so every sentence can be
-  traced back.
+**Schema.** `CLAUDE.md`, a few page templates and `scope.md` (what
+belongs in this brain) define how agents work. The brain's owner writes
+them; agents may only propose changes.
 
-**Rules for agents.** A schema file (`CLAUDE.md`), a few page templates
-and a scope file (`scope.md`: what belongs into this brain) tell the
-agents how to work. The brain's owner writes these files; agents only
-propose changes.
+**Git as the record.** The content repo's history is the log of who
+changed what, when, why and from which source. Search indexes and caches
+are derived and can be rebuilt from the repo.
 
-**Git is everything else.** The history of the content repo *is* the
-log: who changed what, when, why, and from which source. Search indexes
-and caches are derived and can always be rebuilt from the repo. Nothing
-lives only inside a tool.
+**Few page types.** Only types whose membership is indisputable:
+`person`, `meeting`, `paper`, `grant`, and `source` (the summary of one
+raw item). Everything else is an untyped `page` with free tags such as
+`project`, `idea` or `decision`.
 
-**Few page types.** A type exists only where membership can never be
-disputed: `person`, `meeting`, `paper`, `grant`, and `source` (the
-summary of one raw item). Everything else is an untyped `page` with free
-tags (`project`, `idea`, `decision`, …). There is no ontology to argue
-about.
+**Grounding.** Numbers, dates and quotes are copied verbatim from the
+source and checked by a script. Anything an assistant computed or
+suggested on its own is marked as such. Genuine disagreement between
+sources is kept in a `Status: Disputed` block; a fact that changed is
+updated in place, with the old version in git.
 
-**Nothing unsourced.** Numbers, dates and quotes are copied verbatim
-from the source and checked by a script. What an assistant computed or
-suggested on its own is marked as such and never becomes a "result".
-Real disagreements between sources stay visible in a `Status: Disputed`
-block; facts that simply changed are updated in place, and git keeps the
-old version.
-
-**Humans have the last word.** A human-written line is protected from
-agents unless a newer source justifies the change, and a page marked
-`locked: true` is off-limits to agents altogether.
+**People decide.** Agents may change a line a person wrote only on the
+basis of a newer source, and may not touch a page marked `locked: true`.
 
 ## 3. Architecture
 
-### Code and content are separate
+### Code and content
 
-| Repo | Contains | Changed by |
+| Repo | Contents | Changed by |
 |---|---|---|
-| **Code** (`wintermute-brain`, this repo) | tools, Claude Code plugin, server worker, reusable checks, design specs, tests | developers |
-| **Content** (one per brain, e.g. per team or per confidentiality level) | sources, pages, schema, scope, settings | agents and members |
+| **Code** (`wintermute-brain`) | tools, Claude Code plugin, server worker, reusable checks, specs, tests | developers |
+| **Content** (one per brain, e.g. per team or confidentiality level) | sources, pages, schema, scope, settings | agents and members |
 
-One code base can serve several brains. Each content repo **pins a
-release** of the code (`.brain-version`); its checks, its server worker
-and its members' plugin all use that release. Upgrading a brain is a
-small, reviewable change in its content repo. Work on the code itself
-never becomes brain content.
+One code base serves any number of brains. Each content repo pins a code
+release in `.brain-version`; its checks, server worker and members'
+plugin all run that release, and upgrading is a one-line change in the
+content repo. Development work on the code is never captured as brain
+content.
 
-### Three places
+### Components
 
 ```
  member's machine                 GitHub                        server
@@ -93,138 +77,151 @@ never becomes brain content.
                                   · "Brain health" issue            searches
 ```
 
-- **Members' machines** do what needs the person: their commands and
-  their work sessions.
-- **The server** does the heavy and the single-writer work: compiling
-  new sources into pages, and search.
-- **GitHub** is the gate and the record: nothing reaches the main branch
-  without passing the check.
+- **Members' machines** run their commands and capture their work
+  sessions.
+- **The server** compiles new sources into pages (a single writer) and
+  hosts search.
+- **GitHub** gates and records every change.
 
-### How a change flows
+### Write path
 
-Every write follows the same path:
+1. The agent works in a fresh worktree of the content repo.
+2. It writes pages, runs the evidence check, and commits through
+   `commit-op`. The commit records the agent, the person who asked, the
+   source, the planned pages and a reason for each changed page.
+3. `commit-op` opens a pull request with auto-merge.
+4. The required check validates formats and links, the immutability of
+   sources, the absence of secrets, locks and protected lines, and that
+   no one else changed the same pages in the meantime.
+5. A passing PR merges and the indexes are regenerated. A failing one is
+   discarded and the operation starts again; agents never resolve
+   conflicts.
 
-1. The agent works in a **fresh private copy** of the content repo.
-2. It writes its pages, checks the evidence, and commits through one
-   tool (`commit-op`). The commit names the agent, the person who asked,
-   the source, a **plan** (which pages it meant to touch) and a
-   **reason** for each changed page.
-3. `commit-op` opens a **pull request** with auto-merge.
-4. GitHub runs the **check**: formats and links are valid, sources
-   unchanged, no secrets, locked pages and human lines respected, and
-   nobody else changed the same pages in the meantime.
-5. If it passes, the PR merges by itself, and the indexes are
-   regenerated. If it fails, the agent throws its copy away and starts
-   over. It never resolves conflicts itself.
+Concurrent writers therefore cannot overwrite each other silently.
 
-So many people and agents can write at the same time: conflicts are
-rejected, not silently overwritten.
+### Input
 
-### Two kinds of input
+**Ingest (on request).** Given a URL, DOI, arXiv id or file, the agent
+fetches the source, removes secrets, checks it against `scope.md`, stores
+it in `raw/`, classifies it (new, update, disputed, no new material),
+writes its summary page and updates the affected pages in one PR.
 
-**On request (ingest).** Someone says "ingest this URL / paper / file".
-The agent fetches it, scans it for secrets, checks it against the
-brain's scope, stores it in `raw/`, decides what it adds (new, update,
-disputed, nothing), writes a summary page and updates the affected
-pages, all in one PR.
+**Session capture (automatic).** In projects where the plugin is
+enabled, hooks digest the conversation in the background every ~20
+messages. A small model keeps decisions, findings, failed approaches,
+how-tos and open questions, and by default nothing. Each digest is added
+to `raw/` by PR; the compile worker turns digests into pages one at a
+time, oldest first.
 
-**Automatically (session capture).** While someone works with Claude
-Code in a project, the plugin's hooks digest the conversation every ~20
-messages in the background. A small model keeps only decisions,
-findings, failed approaches, how-tos and open questions; the default is
-to keep nothing. The digest goes into `raw/` as a PR. The server's
-**compile worker** later turns digests into pages, one at a time and
-oldest first, so later decisions update earlier ones.
+### Queries and checks
 
-### Questions and health
+- **Ask** reads the indexes, searches, reads the most relevant pages and
+  answers with citations, stating which parts come from pages and which
+  from raw sources, and what the brain does not cover. It writes nothing.
+- **Lint** runs mechanical checks on every change and, on request, a
+  judgment pass by an agent (claims against sources, duplicates, stale
+  statements). It also lists open disputes and sources flagged as out of
+  scope. Unattended runs report to a single GitHub issue, "Brain health".
 
-- **Asking** reads the indexes, searches, reads the best pages and
-  answers with citations. It says which parts come from pages and which
-  from raw sources, and what the brain does not know. Asking writes
-  nothing.
-- **Lint** checks the brain: mechanical checks on every change, and a
-  judgment check by an agent (claims vs. sources, duplicates, stale
-  statements) on request. It also lists open disputes and sources
-  flagged as outside the scope. Problems from unattended runs go to one
-  GitHub issue, "Brain health".
+## 4. Installing
 
-## 4. Using a brain
+Reading a brain needs nothing but access to its content repo (section
+5). Asking, adding and editing need the plugin:
 
-### Getting started
+1. **Prerequisites:** git, the GitHub CLI `gh` (logged in, with write
+   access to the content repo), Claude Code, Python 3 with PyYAML, and
+   gitleaks for the secret scan.
+2. **Get the brain:** clone the content repo, without downloading large
+   files (PDFs stay on the server).
+3. **Get the plugin** at the release the brain pins in `.brain-version`,
+   and start Claude Code with it.
+4. **Configure:** tell the plugin which brain to use (the content repo
+   and your clone of it) and who you are (your person slug, used in
+   commit records).
+5. **Check:** ask a question with `/brain-ask`; the answer should cite
+   pages of the brain.
 
-Setup takes a few minutes: clone the brain's content repo, load the
-plugin into Claude Code, set your name. Each content repo's README has
-the exact steps.
+The content repo's README has the exact commands for that brain.
 
-### Reading
+## 5. Reading
 
-Browse the content repo on GitHub, or open it in Obsidian (the link
-settings come with the repo). Start at `index.md`: one catalog per page
-type.
+A brain is plain Markdown in git, so any viewer works: GitHub in the
+browser, Obsidian (link settings ship with the repo), or an editor.
 
-### Asking
+**Where to start.** `index.md` at the root links one catalog per page
+type (`wiki/person/index.md`, `wiki/page/index.md`, …), one line per
+page with its description.
 
-Ask in any Claude Code session with the plugin, e.g. "What did we decide
-about the evaluation protocol of project X?" Expect citations, and
-expect the answer to say what is missing or how old the newest source
-is.
+**What a page contains.**
 
-### Adding knowledge
+- A header (frontmatter) with `type`, `title`, a one-line `description`,
+  `tags`, and optionally `status: deprecated` or `locked: true`.
+- Sections from the type's template; untyped pages are free-form.
+- Citations: each claim ends with a link to the summary page of its
+  source.
+- Possibly a `Status: Disputed` block, where sources disagree, or a
+  `Scope check:` line, where a source may not belong in the brain.
 
-- **Sources:** "ingest <url / DOI / arXiv id / file>". One source per
-  request: documents, papers, meeting notes, web pages about the team's
-  work.
-- **Your work sessions:** work with Claude Code in your project with the
-  plugin loaded; decisions and findings flow in by themselves. Say *why*
-  when you decide something; the reason is what makes a digest useful
-  later.
-- **What session capture keeps, and how to say no:** decisions,
-  findings, failed approaches and open questions, *with names*; never
-  code, chatter, personal remarks or secrets. Every captured session
-  starts with a one-line notice. Switch it off for a session, or don't
-  enable the plugin in a repo. You can ask the brain's owner to remove
-  content about you, including from the history.
-- **Scope:** each brain's `scope.md` says what belongs in it. Sources
-  outside it are still taken in but flagged, until a human decides.
+**Following a claim to its source.** Click the citation to reach the
+source's summary page; that page names the raw item in `raw/`, which
+holds the original text.
 
-### Correcting
+**Seeing why a page says what it says.** A page's history on GitHub
+("History", or "Blame" line by line) shows every change with its author
+(an agent or a person), the person who triggered it, the source, and the
+reason given for the change.
 
-- **Small fixes:** edit the page yourself (editor, Obsidian, GitHub) and
-  open a PR. Your lines are then protected from agents.
-- **Larger changes:** ask an agent ("edit: merge these two pages",
-  "mark this as deprecated").
-- **Important pages:** set `locked: true`; agents will only report what
-  they think should change.
-- **Disagreements:** if sources really disagree, the page shows both in
-  a `Status: Disputed` block. Resolve it by editing the page, or ask an
-  agent with your reason. Agents resolve a dispute on their own only
-  when a newer source explicitly corrects the old one.
+## 6. Using a brain
 
-## 5. Running a brain
+**Asking.** In any Claude Code session with the plugin, e.g. "What did
+we decide about the evaluation protocol of project X?"
 
-**The brain's owner** decides its schema (page types, templates, agent
-rules) and scope, and approves new code releases for its content repo.
+**Adding sources.** `ingest <url | DOI | arXiv id | file>`, one source
+per request.
 
-**Developers** change the code repo through PRs with tests, publish a
-release tag, and move content repos to it with a small PR.
+**Session capture.** Work with the plugin loaded and decisions and
+findings are captured automatically, including the names of the people
+involved; code, chatter, personal remarks and secrets are not. Stating
+the reason for a decision makes the digest useful. Each captured session
+starts with a one-line notice; capture can be switched off per session
+or per repo, and anyone can ask the owner to remove content about them,
+including from the history.
 
-**The server operator** runs the compile worker and search. The worker
-pulls the content repo regularly, switches its code copy to the pinned
-release, and compiles new raw items. Only one compile worker may run per
-brain.
+**Scope.** Sources outside a brain's `scope.md` are ingested but flagged
+until someone deletes them or clears the flag.
 
-**GitHub setup** per content repo: the required check, a ruleset that
-protects the main branch, and a GitHub App that is the only thing
-allowed to push regenerated indexes directly.
+**Corrections.**
 
-**Admins** handle the rare disruptive operations, such as erasing
-personal data from the history on request (`admin/`).
+- Edit a page directly (editor, Obsidian, GitHub) and open a PR; your
+  lines are then protected from agents.
+- Ask an agent for larger changes ("merge these two pages", "mark this
+  page as deprecated").
+- Set `locked: true` on pages agents must not change; they will only
+  report suggested changes.
+- Resolve a `Status: Disputed` block by editing the page, or by asking
+  an agent and giving the reason. Agents resolve disputes on their own
+  only when a newer source explicitly corrects the old one.
 
-## 6. Where to read on
+## 7. Operating a brain
 
-- A content repo's README: setup and commands for its members.
+- **Owner:** decides the schema (page types, templates, agent rules)
+  and the scope, and approves code upgrades for the content repo.
+- **Developers:** change the code repo through tested PRs, tag a
+  release, and upgrade content repos with a one-line PR.
+- **Server operator:** runs the compile worker and search. The worker
+  polls the content repo, checks out the pinned code release and
+  compiles new raw items. One compile worker per brain.
+- **GitHub setup** per content repo: the required check, a ruleset
+  protecting the main branch, and a GitHub App, the only actor allowed
+  to push regenerated indexes directly.
+- **Admins:** perform rare history-rewriting operations, such as
+  erasing personal data on request (`admin/`).
+
+## 8. Further reading
+
+- Content repo README: member setup and commands.
 - This repo's README: layout, tools, releases.
 - `specs/00`–`06`: requirements, data model, ingest, agent operations,
   retrieval, interfaces, operations.
 - `specs/implementation-status.md`: what is built, tested and open.
-- `specs/parked.md`: ideas for later, with the priority items on top.
+- `specs/parked.md`: deferred ideas, priority items first.
