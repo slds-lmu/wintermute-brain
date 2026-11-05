@@ -83,7 +83,9 @@ jobs:
             BASE="${{ github.event.before }}"
             HEAD_SHA="${{ github.sha }}"
             # First push or forced history: fall back to the parent commit.
-            git cat-file -e "$BASE" 2>/dev/null || BASE=$(git rev-parse HEAD~1 2>/dev/null || echo "$HEAD_SHA")
+            # (On a repo's first commit there is no parent; `rev-parse HEAD~1`
+            # would print its argument to stdout, so use --verify --quiet.)
+            git cat-file -e "$BASE" 2>/dev/null || BASE=$(git rev-parse --verify --quiet "$HEAD_SHA~1" || echo "$HEAD_SHA")
           fi
           AUTHOR=$(git log -1 --format=%ae "$HEAD_SHA" | tr 'A-Z' 'a-z')
           AGENT=""
