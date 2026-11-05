@@ -8,7 +8,7 @@ SamurAIGPT/llm-wiki-agent (multi-platform): https://github.com/SamurAIGPT/llm-wi
 Astro-Han/karpathy-llm-wiki (single Agent Skill): https://github.com/Astro-Han/karpathy-llm-wiki
 Overview + ranked implementations (denser.ai): https://denser.ai/blog/llm-wiki-karpathy-knowledge-base/
 Claude Code memory docs: https://code.claude.com/docs/en/memory
-kepano/obsidian-skills is by Obsidian’s CEO and is the closest thing to an “official” substrate — if you end up writing your own skills, that’s the one to build on rather than reinventing Obsidian syntax handling.
+[Not used, 2026-10-29: prescribes wikilinks, see proposals R1.] kepano/obsidian-skills is by Obsidian’s CEO and is the closest thing to an “official” substrate — if you end up writing your own skills, that’s the one to build on rather than reinventing Obsidian syntax handling.
 
 
 

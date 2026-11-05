@@ -44,6 +44,11 @@ agreed. Order of work:
    implementation shows the spec is wrong, update the spec first, then
    the code.
 
+**Discussion happens in docs, not the console.** Put results, plans
+and spec text into the existing docs (`specs/…`, or the session's
+working doc such as `today.md`). Keep console replies to a few lines:
+what changed and where.
+
 Spec status lives in each file's header: `draft` → `accepted` →
 `superseded`. Only `accepted` specs may be implemented.
 
@@ -61,6 +66,7 @@ specs/
   v0-foundation.md    # v0 = fork of Astro-Han/karpathy-llm-wiki; gaps + fixes
   prior-art.md        # what we reuse / fork / borrow, and why
   proposals.md        # itemised ideas from prior art, awaiting decisions
+  parked.md           # ideas parked until after v1/v2; never lose them
   reading-guide.md    # ordered reading list for the prior art
   research/           # full prior-art reports backing prior-art.md
   decisions/          # short ADRs: NNNN-title.md, one decision each
@@ -112,10 +118,19 @@ weigh in the specs:
   names, root-absolute Markdown links, and git as provenance.
 - v0 foundation: `specs/v0-foundation.md`, a fork of
   Astro-Han/karpathy-llm-wiki (accepted).
-- Prior art: `specs/prior-art.md`. P1 (OKF), P2 (citations) and P3
-  (generated per-folder index) are decided. **P4–P8 are open and
-  important: revisit ASAP.**
-- Next: `03-agent-ops.md`.
+- Prior art: `specs/prior-art.md`. P1 (OKF), P2 (citations), P3
+  (generated per-folder index) and P4 (fork Astro-Han, see
+  v0-foundation) P5 (minimal types), P7 (lock + protected human
+  lines) and P8 (two-layer lint) are decided; P6 is deferred (M4). Candidate bases (AnythingLLM, arkon,
+  nashsu/llm_wiki, team wikis) were assessed 2026-11-05: none
+  qualifies (research F–H).
+- Parked ideas for after v1/v2: `specs/parked.md` (K17 disputes
+  workflow is priority).
+- Agent ops: `specs/03-agent-ops.md` (draft, O1–O4 open).
+- Ingest: `specs/02-ingest.md` (draft; automatic session channel).
+- Ops: `specs/06-ops.md` (draft).
+- Retrieval / interfaces: `specs/04-retrieval.md`, `specs/05-interfaces.md`
+  (drafts; all questions decided).
 
 ## Design principles (owner, 2026-10-29)
 

@@ -2,7 +2,7 @@
 
 Status: **draft**
 Owner: Bernd Bischl
-Last updated: 2026-10-29
+Last updated: 2026-11-05
 
 ## 1. Purpose
 
@@ -59,8 +59,11 @@ Priority: **M** = must (MVP), **S** = should (post-MVP), **C** = could.
   not backed. Follows OKF v0.2.
 - **R5 (M)** Outdated claims are edited in place, and git keeps the
   history. A replaced page is kept and gets OKF `status: deprecated`.
-  *(Contradiction handling was dropped for v1 and supersession extras
-  were deferred, both on 2026-10-29; OKF has neither.)*
+  *(Supersession extras were deferred on 2026-10-29; OKF has none.)*
+  When sources genuinely disagree on content (results, opinions; not
+  a fact that simply changed), the page states both claims with their
+  citations under a `Status: Disputed` blockquote (from v0; adopted
+  2026-11-05, to be fine-tuned later; see 01 § 6).
 - **R6 (M)** Every operation regenerates the per-folder `index.md` files (by script) and
   leaves a structured git commit, which serves as the operation log
   (see 01 D4, D5).
@@ -68,10 +71,19 @@ Priority: **M** = must (MVP), **S** = should (post-MVP), **C** = could.
 ### Operations
 - **R7 (M)** *Ingest*: a source → summary page plus updates to the
   affected entity/concept pages, index, and log.
-- **R8 (M)** *Query*: answer from the wiki with citations. Good answers
-  can be filed back as pages.
-- **R9 (M)** *Lint*: detect contradictions, stale claims, orphans,
-  broken links, missing pages, and tier violations (R14).
+- **R8 (M)** *Query*: answer from the wiki with citations. Query writes
+  nothing. New knowledge from a query conversation reaches the wiki
+  via the automatic session digest (`raw/`) and the compile step, not
+  by filing the answer directly into `wiki/` (2026-11-05).
+- **R9 (M)** *Lint*, in **two layers** (decided 2026-11-05, P8):
+  - *Mechanical* (scripts, no LLM; on every push and in CI):
+    frontmatter valid, broken or non-`/wiki/…` links, `raw/` unchanged,
+    indexes current, secrets, orphans, locks and protected human lines
+    (01 § 5.3), and later tier violations (R14).
+  - *LLM* (by hand in the MVP, scheduled later, R11): stale claims,
+    duplicate pages, uncited claims, open `Status: Disputed` blocks,
+    claims not supported by their cited source. Reports only; it does
+    not fix.
 - **R10 (M)** Agents may write **fully autonomously**, with no human
   approval gate per change. Safety comes from git: every agent change
   is an attributable commit that can be reverted (R18).
@@ -81,7 +93,8 @@ Priority: **M** = must (MVP), **S** = should (post-MVP), **C** = could.
 - **R12** Supported sources:
   - (M) web pages and papers (URL, arXiv, DOI, PDF)
   - (S) Mattermost threads and DMs
-  - (S) Claude Code / claude.ai session digests
+  - (M) Claude Code session digests, **automatic** (moved into the MVP
+    2026-11-05; see 02 § 2). claude.ai sessions: (S)
   - (S) mail, Google Docs/Drive, meeting notes and transcripts
 
 ### Access and confidentiality
@@ -123,8 +136,8 @@ Priority: **M** = must (MVP), **S** = should (post-MVP), **C** = could.
 ## 6. Non-functional requirements
 
 - **N1** Boring, inspectable formats. No database as the source of truth.
-- **N2** Works without custom tooling at MVP scale: `index.md` + grep.
-  Expected scale is **>2000 sources in year one**, driven by Mattermost,
+- **N2** Search is **qmd from the MVP on** (keyword/BM25 mode first;
+  owner, 2026-11-05). Expected scale is **>2000 sources in year one**, driven by Mattermost,
   mail and meeting ingest. A flat index won't hold at that size, so
   search is needed. **Decided 2026-10-29: the search layer is qmd**
   (see 01 § 7). It searches everything, wiki pages and raw sources.
@@ -140,13 +153,22 @@ Priority: **M** = must (MVP), **S** = should (post-MVP), **C** = could.
 ## 7. MVP (milestone 1)
 
 - A single tier (*group*) in one repo.
-- Manual loop: ingest, query and lint run by hand via Claude Code.
-- Ingest channel: web pages and papers.
+- Manual loop for web/paper ingest, query and lint, run by hand via
+  Claude Code.
+- Ingest channels: web pages and papers (human-triggered), and
+  **Claude Code session digests (automatic**, 02 § 2; added
+  2026-11-05). This needs one ingest worker on the group server.
 - Interfaces: Obsidian and Claude Code.
 - Covers R1–R10, R15, R16, R18–R20.
 
-Done when, after ingesting ~20 real sources, UC1–UC4 can be answered
-from the wiki with correct citations, and lint runs clean.
+Done when, after ingesting ~20 real sources plus the session digests
+of a few weeks of real project work, UC1–UC4 can be answered from the
+wiki with correct citations, and lint runs clean.
+
+**Personal data** (owner, 2026-11-05): no policy for now. The first
+phase is a test run, and **humans decide what gets ingested** (for
+sessions: which project repos opt in). A
+personal-data policy is a priority item for later (`parked.md` K27).
 
 Later milestones (order to be decided):
 - more tiers (R13, R14)
@@ -170,8 +192,9 @@ Later milestones (order to be decided):
 - **Personal data.** Orga content about people (students, staff,
   reviews). R16 allows processing it with cloud LLMs, but retention
   and deletion of personal data in git history still needs a policy.
-  Deprioritized by the owner (2026-10-29); not a blocker for any
-  planned milestone.
+  Deprioritized by the owner (2026-10-29, 2026-11-05): the first
+  phase is a test run with humans choosing what to ingest. Policy is
+  a priority item for later (`parked.md` K27).
 - **Guesses hardening into facts.** R4 was dropped for v1; citations
   (R3) are the only guard. Revisit if lint or users find agent
   inferences passing as facts.
@@ -183,10 +206,11 @@ Later milestones (order to be decided):
 - Scale: >2000 sources in year one (N2).
 - Hosting: private repos in the `slds-lmu` GitHub org, one repo per
   tier (N3).
-- Initial page types: person, project, grant, paper, method, concept,
-  course, decision, meeting, how-to, idea (added 2026-10-29, including
-  failed ones). Theses are tracked as projects.
-  Details go in `01-data-model.md`.
+- Page types: **minimal and indisputable only** (revised 2026-11-05):
+  person, meeting, paper, grant, source, plus the untyped catch-all
+  `page` for everything else (projects, ideas incl. failed ones,
+  decisions, concepts, …), distinguished by tags. Theses are pages
+  tagged `project` + `thesis`. Details in `01-data-model.md` § 5.2.
 
 ## 10. Open questions
 
