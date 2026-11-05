@@ -10,6 +10,9 @@ one per confidentiality tier (01 § 1):
 | `slds-lmu/wintermute-brain` (this) | tools, Claude Code plugin, server, reusable workflows, specs, tests |
 | `slds-lmu/wintermute-brain-content-slds` | `raw/`, `wiki/`, indexes, templates, `agents.txt`, the agents' `CLAUDE.md`, `.brain-version` |
 
+**New here? Read [`docs/tutorial.md`](docs/tutorial.md)** — what the brain
+is, how it is built, how to use and run it.
+
 A content repo pins the code it uses in `.brain-version` (a release tag
 of this repo). Its CI calls this repo's reusable workflows at that tag;
 the server worker checks out the same tag. Upgrading = a PR in the
