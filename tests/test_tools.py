@@ -2,7 +2,7 @@
 broken copy per lint rule; plus index, check_evidence and the commit-op
 write path on real git repos).
 
-Run: python3 -m unittest discover -s tools/tests -v
+Run: python3 -m unittest discover -s tests -v
 """
 
 from __future__ import annotations
@@ -15,8 +15,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-TOOLS = Path(__file__).resolve().parent.parent
-FIXTURE = TOOLS / "tests" / "fixtures" / "good"
+ROOT = Path(__file__).resolve().parent.parent          # the code repo
+TOOLS = ROOT / "plugin" / "tools"                       # shipped with the plugin
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 PY = sys.executable
 HUMAN = {"GIT_AUTHOR_NAME": "Jane Doe", "GIT_AUTHOR_EMAIL": "jane@example.org",
          "GIT_COMMITTER_NAME": "Jane Doe", "GIT_COMMITTER_EMAIL": "jane@example.org"}
@@ -515,7 +516,7 @@ class WaitForMergeTest(unittest.TestCase):
 class DigestPiecesTest(unittest.TestCase):
     def test_backlog_split_into_turn_pieces(self):
         import importlib.util
-        path = TOOLS.parent / "plugin" / "scripts" / "brain_session.py"
+        path = ROOT / "plugin" / "scripts" / "brain_session.py"
         spec = importlib.util.spec_from_file_location("brain_session", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

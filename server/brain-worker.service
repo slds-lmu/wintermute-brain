@@ -15,9 +15,9 @@ User=brain
 EnvironmentFile=/etc/brain/worker.env
 # Mint a fresh 1-hour installation token into the environment file's
 # companion, then run the worker with it.
-ExecStartPre=/bin/sh -c 'echo "GH_TOKEN=$(python3 ${BRAIN_DIR}/server/github-app-token.py)" > /run/brain/token.env'
+ExecStartPre=/bin/sh -c 'echo "GH_TOKEN=$(python3 ${BRAIN_CODE_DIR}/server/github-app-token.py)" > /run/brain/token.env'
 RuntimeDirectory=brain
-ExecStart=/bin/sh -c '. /run/brain/token.env; export GH_TOKEN; exec python3 ${BRAIN_DIR}/server/worker.py'
+ExecStart=/bin/sh -c '. /run/brain/token.env; export GH_TOKEN; exec python3 ${BRAIN_CODE_DIR}/server/worker.py'
 RuntimeMaxSec=55min
 Restart=always
 RestartSec=30

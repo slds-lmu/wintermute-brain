@@ -1,7 +1,0 @@
-# Agent git identities (03 § 6.1). tools/commit-op sets one of these as
-# the commit author; every other author counts as human for the lock and
-# protected-line rules (01 § 5.3). Format: name <email>, one per line.
-brain-agent-interactive <brain-agent-interactive@agents.invalid>
-brain-agent-digest <brain-agent-digest@agents.invalid>
-brain-agent-compile <brain-agent-compile@agents.invalid>
-brain-agent-index <brain-agent-index@agents.invalid>

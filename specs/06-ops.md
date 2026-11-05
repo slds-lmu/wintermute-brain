@@ -29,8 +29,13 @@ and the record.
   and the MCP connection to the server's qmd.
 - **Set up once per project repo:** the project repo's committed
   `.claude/settings.json` declares the marketplace and enables the
-  plugin. Anyone opening the repo in Claude Code gets it. The brain
-  repo itself does the same (03 § 4).
+  plugin. Anyone opening the repo in Claude Code gets it. The content
+  repo (`wintermute-brain-content-slds`) does the same (03 § 4); the code repo
+  (`wintermute-brain`) never does (01 § 1).
+- **Code and content are separate repos** (01 § 1, 2026-11-05). The
+  plugin and the tools come from the code repo at the version pinned in
+  the content repo's `.brain-version`; installing the plugin never
+  downloads brain content.
 - **CLI tools, installed once per member** (setup guide or script):
 
   | Tool | Needed for | Who |

@@ -1,0 +1,135 @@
+# Reusable required check for a brain content repo (03 § 2.1), called by
+# the content repo at a pinned release tag of this code repo (01 § 1):
+#   jobs:
+#     check:
+#       uses: slds-lmu/wintermute-brain/.github/workflows/brain-check.yml@v0.1.0
+#       with: { code-ref: v0.1.0 }
+#       secrets: inherit
+# Runs on every PR and every push to main of the content repo:
+#   - `.brain-version` must equal the code version used here;
+#   - mechanical lint with the lock and human-line rules for agent
+#     commits (author listed in agents.txt);
+#   - commit-op preconditions (PRs): files changed in the PR are
+#     unchanged on main since the PR's base, created files don't exist.
+# Findings on pushes to main go to the "Brain health" issue.
+name: brain-check
+
+on:
+  workflow_call:
+    inputs:
+      code-ref:
+        description: release tag of slds-lmu/wintermute-brain (must equal .brain-version)
+        required: true
+        type: string
+    secrets:
+      BRAIN_APP_ID:
+        required: true
+      BRAIN_APP_PRIVATE_KEY:
+        required: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: content
+          fetch-depth: 0         # lint needs history for blame, stale and raw-immutable checks
+          lfs: false             # text files are enough for lint
+
+      # The code repo is private; the content repo's own token cannot read
+      # it, the brain GitHub App (installed on both) can.
+      - uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.BRAIN_APP_ID }}
+          private-key: ${{ secrets.BRAIN_APP_PRIVATE_KEY }}
+          repositories: wintermute-brain
+
+      - uses: actions/checkout@v4
+        with:
+          repository: slds-lmu/wintermute-brain
+          ref: ${{ inputs.code-ref }}
+          path: code
+          token: ${{ steps.app.outputs.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML and gitleaks
+        run: |
+          pip install --quiet pyyaml
+          # Pinned gitleaks release; bump deliberately.
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+
+      - name: Pinned code version
+        working-directory: content
+        run: |
+          PINNED=$(tr -d ' \n' < .brain-version)
+          [ "$PINNED" = "${{ inputs.code-ref }}" ] || {
+            echo ".brain-version is '$PINNED' but the workflow calls code-ref '${{ inputs.code-ref }}'; keep them equal"; exit 1; }
+
+      - name: Determine base, head and author kind
+        id: meta
+        working-directory: content
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --quiet origin main
+            BASE=$(git merge-base origin/main HEAD)
+            HEAD_SHA=$(git rev-parse HEAD)
+          else
+            BASE="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            # First push or forced history: fall back to the parent commit.
+            git cat-file -e "$BASE" 2>/dev/null || BASE=$(git rev-parse HEAD~1 2>/dev/null || echo "$HEAD_SHA")
+          fi
+          AUTHOR=$(git log -1 --format=%ae "$HEAD_SHA" | tr 'A-Z' 'a-z')
+          AGENT=""
+          while read -r name email; do
+            [ "$email" = "<$AUTHOR>" ] && AGENT="$name"
+          done < <(grep -v '^#' agents.txt | sed 's/ *#.*//' | awk 'NF==2')
+          OVERRIDES=$(git log -1 --format=%b "$HEAD_SHA" | sed -n 's/^Overrides-human: *//p' | tr '\n' ' ')
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "agent=$AGENT" >> "$GITHUB_OUTPUT"
+          echo "overrides=$OVERRIDES" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE head=$HEAD_SHA agent=${AGENT:-human} overrides=${OVERRIDES:-none}"
+
+      - name: Lint
+        id: lint
+        working-directory: content
+        run: |
+          set +e
+          ARGS=(--base "${{ steps.meta.outputs.base }}" --head "${{ steps.meta.outputs.head }}" --no-stale)
+          [ -n "${{ steps.meta.outputs.agent }}" ] && ARGS+=(--agent "${{ steps.meta.outputs.agent }}")
+          for o in ${{ steps.meta.outputs.overrides }}; do ARGS+=(--overrides "$o"); done
+          [ "${{ github.event_name }}" = "push" ] && ARGS+=(--check-index)
+          python3 ../code/plugin/tools/lint "${ARGS[@]}" | tee lint.txt
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Preconditions
+        id: pre
+        if: github.event_name == 'pull_request'
+        working-directory: content
+        run: |
+          set +e
+          python3 ../code/plugin/tools/commit-op --check --base "${{ steps.meta.outputs.base }}" --head "${{ steps.meta.outputs.head }}" --upstream origin/main | tee pre.txt
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Report findings on main to the Brain health issue
+        if: github.event_name == 'push' && steps.lint.outputs.status != '0'
+        working-directory: content
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; grep -E '^(error|warn)' lint.txt; echo '```'; } \
+            | python3 ../code/plugin/tools/report-health --repo "${{ github.repository }}" \
+                --title "lint on main found problems" --ref "${{ github.sha }}" \
+                --agent "${{ steps.meta.outputs.agent }}"
+
+      - name: Fail if the check did not pass
+        run: |
+          [ "${{ steps.lint.outputs.status }}" = "0" ] || { echo "lint failed"; exit 1; }
+          [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ steps.pre.outputs.status }}" = "0" ] || { echo "preconditions failed"; exit 1; }

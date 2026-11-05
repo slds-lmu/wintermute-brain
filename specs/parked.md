@@ -32,6 +32,7 @@ Look at these first when v1 runs.
 | # | Idea | Origin | Affects |
 |---|---|---|---|
 | K29 | **Mattermost pings for brain health.** Mirror the "Brain health" GitHub issue (lint reports, failed operations) to Mattermost, so people get pinged where they already talk; ideally the person concerned (e.g. the one whose session or page is affected) gets a direct ping. Needs the Mattermost bot (00 R17) | owner, 2026-11-05 | 03 § 5.3, 05 |
+| K32 | **DECIDED (2026-11-05), see 01 § 1: code repo `wintermute-brain` + content repo `wintermute-brain-content-slds`; schema with the content; pinned code version; fresh start; no digests of code work. Implementation pending.** **PRIORITY (very high). Separate code from content.** Today brain content (`raw/`, `wiki/`) and code (`tools/`, `plugin/`, `server/`, specs, tests) live in one repo (`wintermute-brain`; implementation decision 1). The owner considers this bad; to be discussed and solved right after the implementation-decision review | owner, 2026-11-05 | 01 § 1–2, 06 |
 
 ## From the P7 decision (2026-11-05)
 

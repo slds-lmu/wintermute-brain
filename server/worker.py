@@ -8,10 +8,15 @@ qmd. The queue is derived (raw items without a summary page); the only
 local state is a backoff file for items that keep failing, which is a
 cache and may be deleted.
 
+Code and content are separate repos (01 § 1): BRAIN_DIR is a clone of
+the content repo; BRAIN_CODE_DIR a clone of the code repo, which the
+worker checks out at the tag pinned in the content's `.brain-version`
+before every cycle, so CI, members and the server run the same code.
+
 Environment
-  BRAIN_DIR        clone of the brain repo (full LFS fetch)       required
-  BRAIN_REPO       GitHub repo slug                               slds-lmu/brain-group
-  BRAIN_PLUGIN_DIR the plugin directory (skill, commands)         $BRAIN_DIR/plugin
+  BRAIN_DIR        clone of the content repo (full LFS fetch)      required
+  BRAIN_CODE_DIR   clone of the code repo (slds-lmu/wintermute-brain) required
+  BRAIN_REPO       GitHub repo slug of the content               slds-lmu/wintermute-brain-content-slds
   BRAIN_MODEL      model for the compile agent                    sonnet
   BRAIN_POLL       seconds between polls                          300
   BRAIN_MAX_TRIES  attempts per item before reporting + 24 h backoff   3
@@ -34,8 +39,10 @@ import time
 from pathlib import Path
 
 BRAIN_DIR = Path(os.environ.get("BRAIN_DIR", "")).expanduser()
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/brain-group")
-PLUGIN_DIR = Path(os.environ.get("BRAIN_PLUGIN_DIR", str(BRAIN_DIR / "plugin")))
+CODE_DIR = Path(os.environ.get("BRAIN_CODE_DIR", "")).expanduser()
+REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
+PLUGIN_DIR = CODE_DIR / "plugin"
+TOOLS = PLUGIN_DIR / "tools"
 MODEL = os.environ.get("BRAIN_MODEL", "sonnet")
 POLL = int(os.environ.get("BRAIN_POLL", "300"))
 MAX_TRIES = int(os.environ.get("BRAIN_MAX_TRIES", "3"))
@@ -73,19 +80,35 @@ def pull() -> bool:
     return True
 
 
+def sync_code() -> bool:
+    """Check out the code repo at the tag pinned in the content's
+    .brain-version (01 § 1)."""
+    try:
+        version = (BRAIN_DIR / ".brain-version").read_text().strip()
+    except OSError:
+        log("content repo has no .brain-version")
+        return False
+    sh(["git", "fetch", "--quiet", "--tags", "origin"], CODE_DIR)
+    r = sh(["git", "checkout", "--quiet", "--detach", version], CODE_DIR)
+    if r.returncode != 0:
+        log(f"cannot check out code version {version}: {r.stderr.strip()[:300]}")
+        return False
+    return True
+
+
 def queue() -> list[str]:
-    r = sh([sys.executable, str(BRAIN_DIR / "tools" / "check_evidence"), "--queue"], BRAIN_DIR)
+    r = sh([sys.executable, str(TOOLS / "check_evidence"), "--queue"], BRAIN_DIR)
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
 
 
 def report_health(title: str, body: str) -> None:
-    sh([sys.executable, str(BRAIN_DIR / "tools" / "report-health"), "--repo", REPO, "--title", title,
+    sh([sys.executable, str(TOOLS / "report-health"), "--repo", REPO, "--title", title,
         "--agent", AGENT, "--body", body], BRAIN_DIR)
 
 
 def compile_item(item: str, dry_run: bool) -> bool:
     """One attempt: worktree → claude -p (skill + commit-op) → verify merge."""
-    r = sh([sys.executable, str(BRAIN_DIR / "tools" / "start-op"), "--agent", AGENT], BRAIN_DIR)
+    r = sh([sys.executable, str(TOOLS / "start-op"), "--agent", AGENT], BRAIN_DIR)
     if r.returncode != 0:
         log(f"start-op failed: {r.stderr.strip()[:300]}")
         return False
@@ -96,13 +119,14 @@ def compile_item(item: str, dry_run: bool) -> bool:
             "claude", "-p", "--model", MODEL, "--dangerously-skip-permissions",
             "--no-session-persistence", "--output-format", "json",
             "--plugin-dir", str(PLUGIN_DIR),
-            "--append-system-prompt-file", str(BRAIN_DIR / "server" / "compile-prompt.md"),
+            "--append-system-prompt-file", str(CODE_DIR / "server" / "compile-prompt.md"),
             prompt,
         ]
         if dry_run:
             log("dry run: " + " ".join(shlex.quote(c) for c in cmd))
             return True
-        env = dict(os.environ, BRAIN_DIR=str(BRAIN_DIR), BRAIN_REPO=REPO, BRAIN_SESSION_DIGEST="off")
+        env = dict(os.environ, BRAIN_DIR=str(BRAIN_DIR), BRAIN_REPO=REPO, BRAIN_TOOLS=str(TOOLS),
+                   BRAIN_SESSION_DIGEST="off")
         r = subprocess.run(cmd, cwd=wt, capture_output=True, text=True, env=env, timeout=3600)
         tail = (r.stdout or r.stderr).strip()[-600:]
         log(f"agent finished ({r.returncode}): {tail}")
@@ -113,7 +137,7 @@ def compile_item(item: str, dry_run: bool) -> bool:
         log("agent timed out")
         return False
     finally:
-        sh([sys.executable, str(BRAIN_DIR / "tools" / "start-op"), "--discard", str(wt)], BRAIN_DIR)
+        sh([sys.executable, str(TOOLS / "start-op"), "--discard", str(wt)], BRAIN_DIR)
 
 
 def reindex() -> None:
@@ -125,7 +149,7 @@ def reindex() -> None:
 
 
 def cycle(dry_run: bool) -> None:
-    if not pull():
+    if not pull() or not sync_code():
         return
     state = load_state()
     now = time.time()
@@ -152,8 +176,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="print the agent command instead of running it")
     args = ap.parse_args(argv)
-    if not BRAIN_DIR.is_dir() or not (BRAIN_DIR / "tools").is_dir():
-        print("BRAIN_DIR must point at a clone of the brain repo", file=sys.stderr)
+    if not BRAIN_DIR.is_dir() or not (BRAIN_DIR / "wiki").is_dir():
+        print("BRAIN_DIR must point at a clone of the content repo", file=sys.stderr)
+        return 2
+    if not CODE_DIR.is_dir() or not (CODE_DIR / ".git").exists():
+        print("BRAIN_CODE_DIR must point at a clone of the code repo", file=sys.stderr)
         return 2
     while True:
         try:

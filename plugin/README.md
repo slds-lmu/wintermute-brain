@@ -22,12 +22,14 @@ marketplace's `.claude-plugin/marketplace.json`, add:
 {
   "name": "brain",
   "description": "SLDS brain: LLM-maintained group wiki",
-  "source": { "source": "github", "repo": "slds-lmu/brain-group", "path": "plugin" }
+  "source": { "source": "github", "repo": "slds-lmu/wintermute-brain", "path": "plugin" }
 }
 ```
 
-Each project repo that wants session digests (02 § 2.1) commits this
-`.claude/settings.json` (the brain repo itself does the same):
+The plugin includes the brain tools (`tools/`), so members need no clone
+of the code repo. Each project repo that wants session digests (02 § 2.1)
+commits this `.claude/settings.json` (the content repo does the same; the
+code repo `wintermute-brain` never does, 01 § 1):
 
 ```json
 {
@@ -48,10 +50,10 @@ npm install -g defuddle              # web ingest only
 # Clone over HTTPS, not SSH: git then uses the same token as `gh` (which
 # opens the PRs), and it works in containers and on the server without SSH
 # keys (live test 2026-11-05).
-GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/slds-lmu/brain-group.git ~/brain-group
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/slds-lmu/wintermute-brain-content-slds.git ~/wintermute-brain-content-slds
 # environment (shell profile)
-export BRAIN_DIR=~/brain-group
-export BRAIN_REPO=slds-lmu/brain-group
+export BRAIN_DIR=~/wintermute-brain-content-slds
+export BRAIN_REPO=slds-lmu/wintermute-brain-content-slds
 export BRAIN_PERSON=first-last
 export BRAIN_QMD_URL=https://<server>/mcp
 export BRAIN_GITHUB_TOKEN=$(gh auth token)

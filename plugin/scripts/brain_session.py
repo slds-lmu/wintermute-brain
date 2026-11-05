@@ -14,7 +14,7 @@ derived from the brain repo. A per-session cache file speeds this up; it
 is a cache, losing it is harmless.
 
 Environment
-  BRAIN_REPO           GitHub repo, default slds-lmu/brain-group
+  BRAIN_REPO           GitHub repo, default slds-lmu/wintermute-brain-content-slds
   BRAIN_PERSON         person slug (first-last); default from git user.name
   BRAIN_DIGEST_MODEL   model for the digest agent, default haiku (02 I3)
   BRAIN_DIGEST_TURNS   new human turns that trigger a digest, default 20 (02 I2)
@@ -38,7 +38,7 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/brain-group")
+REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
 MODEL = os.environ.get("BRAIN_DIGEST_MODEL", "haiku")
 TURNS = int(os.environ.get("BRAIN_DIGEST_TURNS", "20"))
 MINUTES = int(os.environ.get("BRAIN_DIGEST_MINUTES", "30"))
