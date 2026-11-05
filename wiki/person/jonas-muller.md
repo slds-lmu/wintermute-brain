@@ -21,6 +21,9 @@ Erlangen-Nürnberg (FAU), since 11/2023
   [Jonas Müller profile](/wiki/source/src-20261105-jonas-muller-fau-profile.md).
 - EmpkinS (role not described on the profile)
   [Jonas Müller profile](/wiki/source/src-20261105-jonas-muller-fau-profile.md).
+- Ensemble model metamers: co-conceived and co-supervised the study on
+  cross-model perceptual invariances with CNN and transformer ensembles
+  [Ensemble metamers paper](/wiki/paper/boehm-2026-ensemble-metamers.md).
 
 ## Expertise
 

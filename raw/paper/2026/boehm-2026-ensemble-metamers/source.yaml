@@ -1,0 +1,11 @@
+id: boehm-2026-ensemble-metamers
+channel: paper
+title: "Understanding cross-model perceptual invariances through ensemble metamers"
+url: https://doi.org/10.1007/s00521-026-12145-5
+doi: "10.1007/s00521-026-12145-5"
+arxiv: "2504.01739"
+authors: [Lukas Boehm, Jonas Leo Mueller, Christoffer Loeffler, Leo Schwinn, Bjoern Eskofier, Dario Zanca]
+published: 2026-05-28
+retrieved: 2026-11-05
+ingested_by: jan-petermann
+files: [paper.pdf, article.tex, references.bib, arxiv.xml, crossref.json]   # text = arXiv 2504.01739v2 (open preprint); the Springer version is paywalled
