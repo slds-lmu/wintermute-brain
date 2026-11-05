@@ -73,6 +73,7 @@ and answers `NOTHING` or a short digest. gitleaks redacts secrets, then a
 PR adding only `raw/session/<YYYY>/<id>/` is opened through the GitHub
 API with auto-merge. The server compiles it into pages.
 
+- Every captured session starts with a one-line notice (06 § 7a, PD3).
 - Disable for a session: `BRAIN_SESSION_DIGEST=off`.
 - Logs: `~/.cache/brain/digest.log`, `~/.cache/brain/hook.log`.
 - Checkpoints are derived from the brain repo (`source.yaml` has

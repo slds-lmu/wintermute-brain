@@ -30,10 +30,12 @@ shared wiki.
 ### 2.1 Setup: once per project repo
 
 A small Claude Code plugin / hook configuration is committed into the
-**project repo** (not the brain repo). Everyone who works in that repo
-with Claude Code is covered. Projects opt in by adding it. **The brain
+**project repo** (not the content repo). Everyone who works in that repo
+with Claude Code is covered. Projects opt in by adding it. **The content
 repo itself opts in**, so new knowledge from query conversations is
-captured (03 § 4).
+captured (03 § 4). **The code repo `wintermute-brain` never opts in**
+(01 § 1). Until the plugin is in the marketplace, testers load it with
+`claude --plugin-dir` (content repo README).
 
 ### 2.2 When digests are made
 
@@ -52,7 +54,7 @@ terminals get closed, machines crash. So digests are made in pieces:
 
 **Checkpoint without local state.** Each digest's `source.yaml`
 records the session id and the message range it covers. "Where did I
-stop" is derived from the brain repo, so no local state must survive.
+stop" is derived from the content repo, so no local state must survive.
 
 **Accepted gap:** a crashed session's tail in a repo where nobody
 starts Claude Code again is never digested. Closing it would need a
@@ -76,6 +78,13 @@ its own**.
   without a lesson, personal remarks, secrets, and **personal machine or
   tool setup** (someone's tokens, sandbox, shell, editor configuration;
   2026-11-05). Group conventions for tools stay.
+- **Mark the assistant's contributions** (owner, 2026-11-05). Only
+  what the human said, decided or reported counts as the group's.
+  Anything the assistant added on its own (calculations, tests,
+  analyses, advice, judgments) is kept only if useful and always marked
+  as such on its line ("the assistant's calculation, not checked by the
+  group"); never in the title. Live test: an unmarked sign test computed
+  by the assistant ended up as a project "result".
 - **Never re-ingest the wiki.** Anything that merely restates brain
   pages (e.g. an answer the agent built from the wiki) is skipped;
   only what is new in the conversation is kept: information the human
@@ -106,7 +115,7 @@ with Claude Code. The digest is the raw source.
 
 1. **Member's machine:** the digest agent opens a pull request that
    adds **only** `raw/session/<YYYY>/<id>/`. It does this through the
-   GitHub API (`gh`), so no local clone of the brain repo is needed
+   GitHub API (`gh`), so no local clone of the content repo is needed
    (05 U2). A new folder per digest
    means these PRs never conflict.
 2. **Server (GPU server):** **one** ingest worker processes new raw
@@ -127,7 +136,7 @@ locks, protected human lines and git revert, not from human review.
 
 - One extra model call per digest, on the member's account.
 - Every participating machine needs a git identity that may open PRs
-  on the brain repo (O4 in 03).
+  on the content repo (O4 in 03).
 - Personal data in digests: see `parked.md` K27 (priority).
 - Digest quality can only be judged in use. Safeguard: the LLM lint
   regularly samples digests against the pages built from them.

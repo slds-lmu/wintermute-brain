@@ -1,4 +1,4 @@
-# wintermute-brain - code of the SLDS brain
+# wintermute-brain — code of the SLDS brain
 
 The SLDS brain is an LLM-maintained group wiki: immutable raw sources,
 agent-written Markdown pages, git as the log and the provenance. **This
@@ -8,23 +8,27 @@ one per confidentiality tier (01 § 1):
 | Repo | Holds |
 |---|---|
 | `slds-lmu/wintermute-brain` (this) | tools, Claude Code plugin, server, reusable workflows, specs, tests |
-| `slds-lmu/wintermute-brain-content-slds` | `raw/`, `wiki/`, indexes, templates, `agents.txt`, the agents' `CLAUDE.md`, `.brain-version` |
+| `slds-lmu/wintermute-brain-content-slds` | `raw/`, `wiki/`, indexes, templates, `agents.txt`, the agents' `CLAUDE.md`, `scope.md` |
 
-A content repo pins the code it uses in `.brain-version` (a release tag
-of this repo). Its CI calls this repo's reusable workflows at that tag;
-the server worker checks out the same tag. Upgrading = a PR in the
-content repo that changes `.brain-version` and the workflow refs.
+**New here? Read [`docs/tutorial.md`](docs/tutorial.md)** — what the brain
+is, how it is built, how to use and run it.
+
+**Members:** run `bin/setup-brain` once, then start work with `brain`
+(06 § 2.1). For now members, the content repos' checks and the server
+worker all run this repo's latest `main`; pinning a brain to a release
+comes later (`specs/parked.md` K40).
 
 ```
 plugin/            Claude Code plugin: /brain-ingest, /brain-ask, /brain-edit, /brain-lint,
                    brain skill, session-digest hooks, qmd MCP config
 plugin/tools/      index, lint, check_evidence, start-op, commit-op, log, report-health
 server/            container runtime, qmd gateway and GPU coordinator, compile worker, credential helpers
+admin/             admin-only tools (erasure of personal data from history); not in the plugin
 .github/workflows/ check.yml (tests of this repo); brain-check.yml and brain-index.yml
                    (reusable, called by content repos)
                    server-image.yml (immutable GHCR builds for server deployment)
 tests/             fixture wiki, one broken copy per lint rule, git-flow tests
-specs/             the design (00-06), prior art, parked ideas, implementation status
+specs/             the design (00–06), prior art, parked ideas, implementation status
 ```
 
 ## Tools
@@ -38,7 +42,7 @@ $T/index                       # regenerate all index files (--check to verify)
 $T/lint [--fix] [--base REV] [--agent NAME]   # mechanical lint (03 § 5.1)
 $T/check_evidence [pages]      # grounding (--queue: compile backlog, oldest first)
 $T/start-op --agent NAME       # fresh worktree for one operation
-$T/commit-op ...                 # the agents' only write path: lint, preconditions, PR with auto-merge
+$T/commit-op …                 # the agents' only write path: lint, preconditions, PR with auto-merge
 $T/log [--op ingest]           # readable digest of the git log
 python3 -m unittest discover -s tests   # in this repo
 ```

@@ -20,6 +20,8 @@ Environment
   BRAIN_DIGEST_TURNS   new human turns that trigger a digest, default 20 (02 I2)
   BRAIN_DIGEST_MINUTES minutes since the last digest that trigger one, default 30
   BRAIN_SESSION_DIGEST set to "off" to disable the channel
+  BRAIN_CAPTURE        folders whose sessions are captured (path list; set by
+                       `brain` from ~/.config/brain/config.toml). Unset = none
 Needs: claude (CLI), gh (logged in), gitleaks (recommended, R15).
 """
 
@@ -38,13 +40,28 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
+def _member_config() -> dict:
+    """The member's settings file (06 § 2.1) takes precedence over the
+    environment: shell startup files (e.g. ~/.zshenv) can silently
+    override variables that `brain` sets (user test N22)."""
+    path = Path(os.environ.get("BRAIN_CONFIG", "~/.config/brain/config.toml")).expanduser()
+    try:
+        import tomllib
+        return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except Exception:  # noqa: BLE001 - a broken config must not break the hook
+        return {}
+
+
+CFG = _member_config()
+REPO = CFG.get("repo") or os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
 MODEL = os.environ.get("BRAIN_DIGEST_MODEL", "haiku")
 TURNS = int(os.environ.get("BRAIN_DIGEST_TURNS", "20"))
 MINUTES = int(os.environ.get("BRAIN_DIGEST_MINUTES", "30"))
 MIN_TURNS_FLUSH = 3            # a flush at session end/start needs at least this much
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "brain"
 LOG = CACHE / "digest.log"
+NOTICE = ("Brain: this session is captured into {repo} (decisions, findings, failed approaches, "
+          "open questions; names included). Off for one session: BRAIN_SESSION_DIGEST=off.")
 AGENT = "brain-agent-digest"
 AGENT_EMAIL = "brain-agent-digest@agents.invalid"
 MAX_CHARS = 120_000            # transcript budget handed to the digest model
@@ -236,6 +253,29 @@ def consider(transcript: Path, session_id: str, cwd: str, flush: bool) -> None:
         spawn_digest(transcript, session_id, cwd, done + 1, total)
 
 
+def captured(cwd: str) -> bool:
+    """Only sessions in folders listed in BRAIN_CAPTURE (set by `brain` from
+    the member's config, 06 § 2.1), or below them, are captured. Without
+    the list nothing is captured (user test N6: with --plugin-dir every
+    session was)."""
+    if "capture" in CFG:
+        listed = [str(p) for p in CFG.get("capture") or []]
+    else:
+        listed = [p for p in os.environ.get("BRAIN_CAPTURE", "").split(os.pathsep) if p]
+    try:
+        here = Path(cwd).resolve()
+    except OSError:
+        return False
+    for p in listed:
+        try:
+            root = Path(p).expanduser().resolve()
+        except OSError:
+            continue
+        if here == root or root in here.parents:
+            return True
+    return False
+
+
 def hook(event: str) -> None:
     try:
         payload = json.load(sys.stdin)
@@ -244,10 +284,15 @@ def hook(event: str) -> None:
     session_id = payload.get("session_id") or ""
     transcript = Path(payload.get("transcript_path") or "")
     cwd = payload.get("cwd") or os.getcwd()
+    if not captured(cwd):
+        return  # not a captured folder: no digest, no notice (06 § 2.1)
     if event in ("stop", "end"):
         if transcript.is_file() and session_id:
             consider(transcript, session_id, cwd, flush=(event == "end"))
     elif event == "start":
+        # Tell the person that this session is captured (06 § 7a, PD3). Claude
+        # Code shows a hook's `systemMessage` to the user.
+        print(json.dumps({"systemMessage": NOTICE.format(repo=REPO)}), flush=True)
         # Older sessions of this repo with an undigested tail (closed window, crash).
         cutoff = time.time() - 30 * 86400
         for t in project_transcripts(cwd):
@@ -266,7 +311,7 @@ def hook(event: str) -> None:
 
 
 def person_slug() -> str:
-    env = os.environ.get("BRAIN_PERSON")
+    env = CFG.get("person") or os.environ.get("BRAIN_PERSON")
     if env:
         return env
     name = sh(["git", "config", "user.name"]).stdout.strip() or os.environ.get("USER", "unknown")

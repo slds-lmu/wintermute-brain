@@ -10,8 +10,8 @@ cache and may be deleted.
 
 Code and content are separate repos (01 § 1): BRAIN_DIR is a clone of
 the content repo; BRAIN_CODE_DIR a clone of the code repo, which the
-worker checks out at the tag pinned in the content's `.brain-version`
-before every cycle, so CI, members and the server run the same code.
+worker updates to the latest `main` before every cycle (06 § 2.1), like
+CI and members.
 
 Environment
   BRAIN_DIR        clone of the content repo (full LFS fetch)      required
@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -83,24 +82,11 @@ def pull() -> bool:
 
 
 def sync_code() -> bool:
-    """Check out the code repo at the tag pinned in the content's
-    .brain-version (01 § 1)."""
-    try:
-        version = (BRAIN_DIR / ".brain-version").read_text().strip()
-    except OSError:
-        log("content repo has no .brain-version")
-        return False
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?", version):
-        log("content .brain-version must name a release tag")
-        return False
-    ref = "refs/tags/" + version
-    fetched = sh(["git", "fetch", "--quiet", "--depth=1", "origin", ref + ":" + ref], CODE_DIR)
-    if fetched.returncode:
-        log(f"cannot fetch code version {version}: {fetched.stderr.strip()[:300]}")
-        return False
-    r = sh(["git", "checkout", "--quiet", "--detach", ref], CODE_DIR)
+    """Update the code copy to the latest `main` (06 § 2.1; pinning to a
+    release later, parked K40)."""
+    r = sh(["git", "pull", "--quiet", "--ff-only", "origin", "main"], CODE_DIR)
     if r.returncode != 0:
-        log(f"cannot check out code version {version}: {r.stderr.strip()[:300]}")
+        log(f"cannot update the code: {r.stderr.strip()[:300]}")
         return False
     return True
 

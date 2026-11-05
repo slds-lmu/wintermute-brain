@@ -27,22 +27,22 @@ Specs 00–06 accepted; this repo *is* the brain repo (later
 | Server: compile worker (poll, derived queue, 3 tries + backoff, qmd re-index), GitHub App token, qmd auth proxy, systemd units | `server/` | 06, 02 § 2.4 |
 | Search gateway: GitHub token checks that survive GitHub outages and limit unauthenticated use, GPU qmd with handoff, CPU qmd that answers model-free calls and races searches while the GPU is taken | `server/brain_server/` | 06 § 3, § 9 |
 
-## 2. Decisions taken while implementing (owner to confirm)
+## 2. Decisions taken while implementing (made by Marc's agent in PR #1; all reviewed by the owner 2026-11-05)
 
-- **One repo.** Brain content, `tools/`, `plugin/` and `server/` live in
+- **SUPERSEDED (owner, 2026-11-05) by the code/content split (01 § 1, K32).** **One repo.** Brain content, `tools/`, `plugin/` and `server/` live in
   this repo; the wintermute marketplace points at `plugin/`.
-- **Session digest ids:** `src-YYYYMMDD-<repo>-<title>-<sid6>` (first 6
+- **CONFIRMED (owner, 2026-11-05).** **Session digest ids:** `src-YYYYMMDD-<repo>-<title>-<sid6>` (first 6
   chars of the session id), so parallel digests never collide.
   Checkpoints are derived from `source.yaml` (`session`, `messages`); a
   local cache speeds it up.
-- **Digest trigger:** 20 new human turns, or 30 minutes since the last
+- **CONFIRMED (owner, 2026-11-05).** **Digest trigger:** 20 new human turns, or 30 minutes since the last
   digest with at least 3 new turns; session start/end flush needs 3.
-- **Index Action also applies the safe link fix** on `main` (Obsidian's
+- **CONFIRMED (owner, 2026-11-05).** **Index Action also applies the safe link fix** on `main` (Obsidian's
   slash-less links).
-- **Compile worker model:** `sonnet` by default (`BRAIN_MODEL`).
-- **Lint levels:** slash-less links are a warning (auto-fixed on main);
+- **CONFIRMED (owner, 2026-11-05; review cost after the first weeks).** **Compile worker model:** `sonnet` by default (`BRAIN_MODEL`).
+- **CONFIRMED (owner, 2026-11-05).** **Lint levels:** slash-less links are a warning (auto-fixed on main);
   relative and broken links are errors; open Disputed blocks are `info`.
-- `tools/lint --check-index` runs only on pushes to `main` (PRs never
+- **CONFIRMED (owner, 2026-11-05).** `lint --check-index` runs only on pushes to `main` (PRs never
   carry index files).
 
 ## 3. GitHub setup (done 2026-11-05)
@@ -105,8 +105,7 @@ Problems found and how they were handled:
     ingest relies on litdownload (arXiv TeX/HTML) until then.
   - qmd: pick and pin a version (its MCP HTTP flags depend on it); test
     at several thousand files; set up on the server.
-- **Not yet tested live:** the session hooks firing on their own (the
-  digest step was run by hand), the server worker on the server. Paper
+- **Not yet tested live:** the server worker on the actual server. Paper
   ingest was done by Marc (PR #15).
 - Who administers the server worker and the API key (06 § 8).
 
@@ -180,3 +179,207 @@ Problems found and how they were handled:
   `wintermute-brain-content-slds` (fresh start), pinned to code tag
   `v0.1.0` via `.brain-version`. The test content of today stays only in
   this repo's history.
+  **Done 2026-11-05:** PR #32 merged; tags `v0.1.0`, `v0.1.1` (fix:
+  brain-check on a repo's first commit). Content repo set up (schema,
+  thin workflows at v0.1.1, ruleset "main: required check" with required
+  check `check / check`, bypass App + admins, auto-merge on). First
+  ingest into it (SLDS homepage, content PR #1) passed end to end with
+  the tools from `plugin/tools/`; index Action pushed via the App.
+  **Still to do:** the wintermute marketplace entry must point at
+  `slds-lmu/wintermute-brain`, path `plugin` (not important now, owner
+  2026-11-05); open code PRs (closed as outdated; authors may redo them) from before
+  the split (#29 containers, #31 check/digest fixes) need a rebase onto
+  the new layout; members re-point clones and `BRAIN_REPO`.
+- **Live hook test on the split layout** (2026-11-05): a scratch project
+  with the plugin loaded via `--plugin-dir`, a short real `claude -p`
+  conversation (threshold lowered with `BRAIN_DIGEST_TURNS=2`), content
+  repo `wintermute-brain-content-slds` as target.
+  - **Bug, fixed:** `brain-session.sh` redirected its log into
+    `~/.cache/brain/` without creating it, so on a fresh machine the
+    hook silently never ran. Now `mkdir -p` first (needs a release).
+  - **Passed:** Stop hook triggers after 2 messages and digests in the
+    background (content PR #2); a second hook call during the run
+    spawns nothing (pending flag); the SessionEnd flush digests a tail
+    of 3 messages (PR #3); checkpoint advances (1–4, 5–13); the compile
+    queue comes out oldest first on real data.
+  - **Catch-up at SessionStart passed** (2026-11-05): a 3-message
+    session with capture off, backdated 20 minutes; a new session in
+    the same project digested its messages 1–7 at start (content PR
+    #10). The new session's single message was not digested (end flush
+    needs 3). The digest marked both assistant suggestions as such.
+  - **FIXED (2026-11-05, rule "mark it"):** digest prompt, 02 § 2.3,
+    compile prompt and skill keep assistant contributions marked, never
+    in titles, Decisions or Results. Was: **Finding:** digests record the assistant's own contributions
+    as group results. PR #3 states "the 8-of-11 win count is not
+    significant: a two-sided sign test gives p ≈ 0.11", a calculation
+    Claude made, and puts "gap not significant" in the title. Rule to
+    add to the digest prompt: mark everything the assistant contributed
+    (calculations, advice, judgments) as such, or leave it out (00 § 8,
+    guesses hardening into facts).
+  - Minor: without a git remote, `repo:` in `source.yaml` is a local
+    path.
+  - **Compile worker on the split layout passed:** a fresh content clone
+    plus a separate code clone; the worker checked out `v0.1.1` from
+    `.brain-version` by itself and compiled both digests oldest first
+    into `wiki/page/demo-project.md` (Decisions, Status, Results, Failed
+    approaches, Open questions), ~2 min each; index Action via the App.
+    The finding above propagated: the assistant's sign test (p ≈ 0.11)
+    now stands under "Results" as a project result.
+- **Erasure tool** (06 § 7a, PD2; 2026-11-05): `admin/erase` + runbook
+  `admin/README.md`. Tested: refuses non-admins, refuses the code repo,
+  dry run reports and changes nothing, not shipped with the plugin.
+  **Not tested:** the actual rewrite and force-push (needs
+  git-filter-repo, not installed in the test environment).
+- **v0.1.4** (2026-11-05): session-start capture notice (PD3), dispute
+  age in lint and "resolve only clear cases" in skill and compile
+  prompt (K17), scope check (v0.1.3). Content repo moved to it.
+
+## 7. User test as a new member (2026-11-05, Bernd, laptop)
+
+Following the content repo's README step by step: install, read,
+ingest. Findings (open unless marked):
+
+- **N1** Prerequisites are one sentence of prose: no check commands, no
+  install hints.
+- **N2** `gitleaks` is not installed by default, and the README neither
+  says how to install it nor that it is optional (the tools fall back to
+  built-in secret patterns without it).
+- **N3** `gh` may be logged in with a fine-grained token whose owner is
+  the user, not the org, so it cannot see the content repo; the README
+  says "write access" but not how to check it.
+- **N4 (stopper)** With the default `gh` login (a fine-grained token owned
+  by the user) the content repo is invisible (`404 Not Found`). A new
+  member cannot continue, and the README says nothing about which token
+  is needed (owner `slds-lmu`, access to the content repo, permissions:
+  contents, pull requests, issues read/write, actions read) or how to
+  use it only for the brain.
+- **N5** A member needs two clones (content and code) and must check out
+  the code at the pinned tag by hand; git greets them with the
+  "detached HEAD" warning. When `.brain-version` changes, nothing tells
+  them to check out the new tag, so their plugin can silently lag
+  behind the brain's pinned release.
+- **N6 (important)** Which sessions are captured is unclear in the
+  tutorial ("projects where the plugin is enabled") and, with the
+  README's `claude-brain` alias (`--plugin-dir`), wrong in practice: the
+  hooks then run in **every** session started with the alias, in any
+  folder, including the code repo and private projects. The per-repo
+  opt-in (02 § 2.1) only works with the marketplace install. Fix
+  options: the hook itself checks that the repo opted in (e.g. a marker
+  in the repo, or a list in the user's config) and stays silent
+  otherwise; and the docs state exactly which sessions are captured.
+- **N7** Nothing in the content repo explains its structure to a human
+  reader: what `raw/` and its channel folders hold, what each `wiki/`
+  folder and page type is for, and what goes where. The full
+  description is in the code repo (01 § 2, § 4, § 5.2); the content
+  repo's `CLAUDE.md` addresses agents and its README covers setup only.
+  Fix idea: a short "How this brain is organised" page in the content
+  repo (or the README's first section), linked from `index.md`, and
+  one line per folder in the generated catalogs.
+- **N8** Clone size for Obsidian readers. Measured: a paper ~190 KB of
+  text (+ PDF in LFS), a web page 10–50 KB, a digest ~2 KB, a wiki page
+  3–10 KB. Estimate for year one (~300 papers, ~300 web/README sources,
+  ~1500 digests, ~2000 pages): a clone without PDFs **~50–150 MB**
+  (fine); with PDFs by mistake **+1–1.5 GB**; only `wiki/` at the latest
+  version **~10–20 MB**. Risks: forgetting to skip LFS, growth over
+  years (meetings, chat), and readers downloading `raw/` and history
+  they do not need. Fix idea: a reader setup that clones only `wiki/`
+  without history (sparse, shallow), and LFS skipping set by default.
+- **N9** Page types and folders are not configurable per brain: the six
+  types are hardcoded (`plugin/tools/brainlib.py` `TYPES`), and catalogs,
+  lint and agent rules depend on them. Per brain today: templates,
+  `scope.md`, the agents' `CLAUDE.md`. Idea (derive, don't store): a
+  brain's types are its `templates/*.md` plus the built-in `page` and
+  `source`; adding `templates/project.md` adds the type and its folder.
+- **N10** No `projects` folder, although projects are the most important
+  pages (status questions). Cause: the minimal-type decision (P5,
+  2026-11-05): `project` is a tag on untyped pages, so projects sit in
+  the large `wiki/page/` folder and are found only via the tag. Options:
+  (a) a generated "Projects" catalog from the tag; (b) `project` as a
+  real type; (c) each brain decides via its templates (needs N9).
+  Assistant's view: (c), plus (a) in any case. Owner to decide.
+- **N11** `claude-brain` looks like a tool but is only a shell alias
+  (`claude --plugin-dir ~/wintermute-brain/plugin`) defined in the
+  content README's setup. Not mentioned in the tutorial or the plugin
+  README; not explained as a stopgap until the marketplace install; only
+  exists in shells where it was defined. Related to N6 (with the alias,
+  every session is captured).
+- **Worked:** the capture notice at session start; `/brain-ask` ("who is
+  Marc Becker, is he nice?") answered with citations, separated wiki
+  pages from the raw source, stated its limits and the newest source's
+  date, declined the personal judgment by design, and reported the
+  search fallback.
+- **N12** The search server is not configured for members: the README
+  does not mention `BRAIN_QMD_URL`, so the plugin tries `localhost` and
+  gets "connection refused" (fallback to index + grep works and is
+  reported). Once the server's search runs, members need its URL and
+  login in the setup.
+- **N13** Review `slds-paper-litdownload` and the connected SLDS skills
+  (litsearch, litbrowse, …) that paper ingest relies on: what they
+  fetch, where they write, their dependencies, and whether they fit the
+  brain's ingest (staging folder, metadata from registries, LaTeX vs.
+  PDF).
+- **N14** Why scan published papers (and public web pages) for secrets?
+  R15 applies the gitleaks / regex scan to every source, but a published
+  paper is very unlikely to contain credentials, while the scan costs a
+  tool install (gitleaks) and can raise false positives on LaTeX or code
+  listings. Option: scan only channels that can carry secrets (sessions,
+  documents, mail, chat, meetings) and skip registry-backed papers and
+  public pages. Owner to decide.
+- **N15 (stopper)** `gh` used the brain token from `GH_TOKEN`, but `git`
+  itself used other stored credentials, so `start-op`'s `git fetch` got
+  "403 write access not granted". The README covers `gh` login only; it
+  must make git use the same credentials (e.g. `gh auth setup-git`, or a
+  repo-local credential helper `!gh auth git-credential`).
+- **N16** The commands are namespaced by the plugin: `/brain:brain-ingest`
+  etc., while all docs say `/brain-ingest`.
+- **Worked (ingest, up to the failure):** the agent explained each step,
+  used litdownload, fell back to the built-in secret scan without
+  gitleaks, stopped before writing anything, diagnosed the 403 exactly,
+  kept the staged paper, showed its plan (paper page, new `mlr3mbo`
+  page, link from the person page), and left the DOI empty instead of
+  taking it from another source.
+
+### User test 2, with `setup-brain` (2026-11-05)
+
+- **N17** The README asks for a brain token with write access to the
+  content repo but read-only access to the code repo. Fine-grained
+  tokens cannot do that: permissions apply to all selected repos.
+  Options: (a) one token for both repos with the same permissions (it
+  can then also write to the code repo); (b) make the code repo public
+  (no token access needed for it; its history still holds the pre-split
+  test content); (c) two tokens. **Decided (owner): (b), the code repo
+  becomes public.** A gitleaks scan of its full history (all branches)
+  found no secrets. The brain token then needs only the content repo.
+- **N18, fixed:** the self-check reported the optional gitleaks as
+  FAIL, so setup ended with "setup has problems" and no "Done" line.
+  Optional items now show as "note".
+- **Worked:** plain clone of the public code repo; token prompt
+  (pasted, stored in `~/.config/brain/token`); person slug suggested
+  from the git name; write access confirmed; clones without PDFs; config
+  and `brain` installed; git reached the content repo with the same login
+  (the 403 of test 1 is gone).
+- **Worked:** `brain` in a new terminal started Claude Code; in the code
+  repo (not listed under `capture`) no capture notice was shown, as
+  intended (N6 fixed in practice).
+- **N19, fixed in the tutorial:** the capture list was only mentioned in
+  one sentence; § 3 and § 6 still described the old behaviour ("where
+  the plugin is enabled"), and nothing said how to add a project or how
+  to tell whether a session is captured.
+- **N20, fixed:** the ask agent did not find the clone: `env` was denied
+  by the user's permissions and the skill's default folder
+  (`~/wintermute-brain-content-slds`) did not match `setup-brain`'s
+  (`~/brain/…`). The skill now uses the same default and reads single
+  settings with `echo`, never the whole environment (it holds the token).
+- **N21, fixed:** `brain` updated the code but not the content clone, so
+  answers could be stale; it now updates both at startup.
+- **Worked:** `/brain:brain-ask` on the demo project: cited, open points
+  listed, assistant contributions marked, and the difference between the
+  raw digest and the corrected wiki page explained. N12 (no search
+  address) still open.
+- **N22, fixed:** in the brain session `BRAIN_DIR` had the old value:
+  `~/.zshenv` still exported the test-1 settings, and Claude Code's
+  shells read it after `brain` had set the environment. The settings
+  file is now authoritative: the session hooks read it directly, and the
+  skill gets its settings from `brain --settings`; environment variables
+  are only a fallback. (The member removes the old lines from
+  `~/.zshenv`.)

@@ -38,11 +38,10 @@ Node, qmd, Claude Code, git, Git LFS, gh, and gitleaks. Model files and wiki
 content are persistent mounts outside the image.
 
 The worker command is python3 /opt/brain/server/worker.py. It creates the
-content clone if missing, polls main every five minutes, checks out the
-code release named by .brain-version into BRAIN_CODE_DIR, and compiles the
-derived backlog using that release's plugin/tools. The code checkout is
-shallow and fetches the selected tag. Set BRAIN_AUTO_COMPILE=false to retain synchronization
-without running the agent. BRAIN_QMD is empty: indexing belongs to search.
+content clone if missing, polls main every five minutes, updates BRAIN_CODE_DIR
+to the latest main of the code repository, like CI and members, and compiles
+the derived backlog using its plugin/tools. Set BRAIN_AUTO_COMPILE=false to
+retain synchronization without running the agent. BRAIN_QMD is empty: indexing belongs to search.
 Search waits for the worker's initial checkout marker before opening the
 repository. Text indexing runs when main changes; pending embeddings are
 resumed independently without clearing query caches on every poll.
@@ -195,7 +194,7 @@ runs, so clients lose nothing.
 | BRAIN_REPO | slds-lmu/wintermute-brain-content-slds |
 | BRAIN_DIR | /brain/repo |
 | BRAIN_CODE_REPO | slds-lmu/wintermute-brain |
-| BRAIN_CODE_DIR | /brain/code; checkout of the content's pinned code release |
+| BRAIN_CODE_DIR | /brain/code; copy of the code repository at the latest main |
 | BRAIN_POLL | 300 seconds; worker synchronization |
 | BRAIN_AUTO_COMPILE | true |
 | BRAIN_MODEL | sonnet |
@@ -273,7 +272,7 @@ Modern requests also set Mcp-Method and, for tool calls, Mcp-Name to
 match the JSON-RPC body.
 
 Application changes use an ordinary development branch and review PR.
-Content operations continue to use the pinned plugin/tools write path.
+Content operations continue to use the plugin/tools write path.
 
 ## VALIDATION
 

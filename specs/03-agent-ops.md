@@ -12,7 +12,9 @@ open question **[O#]**. Open questions have a recommendation and wait
 for the owner.
 
 The rules go into the forked v0 skill (`SKILL.md`). The scripts live
-in `tools/`.
+in the code repo's `plugin/tools/` and ship with the plugin (01 § 1);
+`tools/…` in the specs means that folder. They run inside a clone of a
+content repo and work on it.
 
 ## 0. What each operation writes
 
@@ -103,9 +105,11 @@ locked pages.
 
 Local hooks can be skipped, so GitHub enforces the same rules before
 anything lands on `main`. Every agent operation is **one pull request
-with auto-merge**. Branch protection on `main` requires the check.
+with auto-merge**. A ruleset on `main` requires the check.
 
-- **Required check** (GitHub Actions, runs `tools/lint` and the
+- **Required check**: the content repo calls the code repo's reusable
+  workflow `brain-check` (at `main` for now, 06 § 2.1), which runs
+  `tools/lint` and the
   `commit-op` preconditions against the current `main`):
   - mechanical lint (§ 5.1);
   - files changed in the PR are unchanged on `main` since the PR's
@@ -122,7 +126,8 @@ with auto-merge**. Branch protection on `main` requires the check.
   human-line rules don't apply to human commits). Only the index
   Action, via the brain GitHub App, may push to `main`. Enforced by a
   ruleset on `main`: required check `check`, no force-push, no
-  deletion, bypass only for the brain GitHub App.
+  deletion, bypass only for the brain GitHub App (during the test
+  phase also repository admins, `parked.md` K31).
 - Each operation takes a few minutes, and parallel operations queue.
   If queues get long, GitHub's merge queue may help (availability for
   our plan is [unverified]).
@@ -144,8 +149,11 @@ phase, humans decide what gets ingested (00 § 7).
    registry, never from the agent's own knowledge (01 § 4). Raw files
    are never changed afterwards.
    A changed upstream source becomes a new raw item (I8).
-4. **Triage** (I2). Search the wiki for the source's entities, aliases
-   and claims, then state one disposition:
+4. **Triage** (I2). First check the source against the content repo's
+   `scope.md`; if it is out of scope or at the edge, ingest it anyway
+   but flag it (tag `scope-check`, one `> **Scope check:**` line; 01
+   § 2.1). Then search the wiki for the source's entities, aliases
+   and claims, and state one disposition:
    - **New:** the source covers something the wiki doesn't have yet;
    - **Update:** it adds to or changes existing pages;
    - **Disputed:** it contradicts an existing claim on content;
@@ -198,7 +206,8 @@ folder via the shared id (01 § 3).
    knowledge from a query conversation reaches the wiki the normal
    way: the conversation is a Claude Code session, so its digest goes
    into `raw/` (02 § 2), and the worker compiles it into `wiki/`. The
-   brain repo opts in to session digests for this.
+   content repo opts in to session digests for this; the code repo
+   never does (01 § 1).
 
 ## 5. Lint
 
@@ -223,6 +232,7 @@ CI on every push.
 | Lock and human-line rules (agent commits only) | report (blocks) |
 | Newly added raw files contain prompt-injection patterns (A3) | report (flags, doesn't block) |
 | Pages untouched in git for 6 months, for `person`, `grant` and pages tagged `project` | report ("needs refresh") |
+| Pages tagged `scope-check` (01 § 2.1), with their reason; missing `scope.md` | report (warn; info) |
 
 Tested against a known-good fixture wiki plus one broken copy per rule
 (L6). Target: at most ~15% false alarms; noisy rules get tuned or
@@ -242,7 +252,7 @@ Run by an agent on request (later R11). Reports only.
 
 Interactive runs show their findings in the session. Everything that
 runs **unattended** reports to **one standing GitHub issue, "Brain
-health"**, in the brain repo:
+health"**, in each content repo:
 
 - one comment per event: a scheduled or CI lint run with findings, or
   a failed operation (gave up after 3 attempts, or its PR failed),
@@ -254,6 +264,39 @@ health"**, in the brain repo:
 
 Reports are not stored as files in the repo; they are neither `raw/`
 nor `wiki/`. Later: mirror them to Mattermost (`parked.md` K29).
+
+### 5.4 Resolving disputes (K17, decided 2026-11-05)
+
+A `Status: Disputed` block (01 § 6) records a real disagreement between
+sources. It is visible on purpose, so it needs a path to resolution, or
+blocks pile up. Proposal:
+
+1. **Noticed:** lint lists every open block with its age (from git: when
+   the block was written), always as info, never escalated (D3).
+   Nobody specific is responsible (D1); whoever follows the "Brain
+   health" report picks disputes up.
+2. **Resolved by a human**, in one of two ways:
+   - edit the page: keep the claim that holds, with its citation, and
+     remove the block; or
+   - ask an agent: `/brain-edit resolve the dispute on <page>: <which
+     claim holds and why>`.
+3. **Agents resolve only clear cases** (D2): when a newer source
+   *explicitly* corrects or replaces an older one (an erratum, a
+   retraction, the final version of a preprint), the agent that ingests
+   it resolves the block itself: it keeps the corrected claim and states
+   the reason in the commit (`Reasons: page/x: dispute resolved, B is
+   the published version of preprint A`). In every other case it only
+   proposes a resolution, as a lint report line, never as an edit.
+4. **Recorded in git:** the commit that removes a block gives the
+   resolution as its reason (`Reasons: page/x: dispute resolved, B holds
+   because …`). No extra field or file; the page shows the current
+   state, history shows how it was settled.
+
+| # | Question | Recommendation |
+|---|---|---|
+| D1 | Who is responsible for an open dispute? | **decided (owner, 2026-11-05): nobody specific for now**; open disputes appear in the "Brain health" report and anyone may resolve them. Blocks are mostly written by agents, so "whoever raised it" would name a random person. Later, with Mattermost pings (K29): ping the people who brought in the two conflicting sources and the people linked on the page |
+| D2 | May an agent resolve a dispute on its own? | **decided (owner, 2026-11-05): only in clear cases**: a newer source explicitly corrects or replaces the old one (erratum, retraction, final version of a preprint); otherwise it only proposes |
+| D3 | Does an old dispute become a warning? | **decided (owner, 2026-11-05): never**; open disputes stay info and are listed with their age |
 
 ## 6. Commit messages
 

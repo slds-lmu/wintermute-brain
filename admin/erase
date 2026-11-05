@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Erase content from a brain content repo, including its git history
+(06 § 7a, PD2). ADMIN ONLY.
+
+Context: removing personal data from the current pages is a normal edit.
+When a person asks for *erasure*, the data must also leave the git
+history. That rewrites every affected commit, breaks open PRs and forces
+everyone to re-clone, so it is never something a member or an agent does:
+
+- this script is not shipped with the plugin (it lives in `admin/`);
+- it refuses to run unless the caller is an admin of the repo;
+- the final force-push is blocked by the content repo's ruleset for
+  everyone but admins;
+- it is a dry run unless `--execute` is given, and then asks the admin to
+  type the repo name;
+- before rewriting it writes a complete backup bundle, so a mistake can be
+  undone (delete the bundle once the result is verified: it still holds
+  the erased data).
+
+What it removes: whole paths (`--path`, e.g. a raw item folder and its
+summary page) and/or text (`--replace-text FILE`, git-filter-repo's
+format: one `literal==>replacement` or `regex:…==>…` per line) from every
+commit on every branch. Requires git-filter-repo on the admin's machine.
+
+What it cannot remove (the runbook in admin/README.md says how): copies in
+GitHub's PR refs and LFS storage (needs GitHub Support), members' clones
+(they must re-clone), the server's clone, and backups outside GitHub.
+
+Usage
+  admin/erase --repo slds-lmu/wintermute-brain-content-slds \\
+      [--path raw/web/2026/src-…/ --path wiki/source/src-….md ...] \\
+      [--replace-text names.txt] [--workdir DIR] [--execute]
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+def run(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise SystemExit(f"failed: {' '.join(cmd)}\n{proc.stderr.strip()}")
+    return proc
+
+
+def is_admin(repo: str) -> bool:
+    """The caller must be an admin of the repo (GitHub permissions)."""
+    proc = run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.admin"], check=False)
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def affected(mirror: Path, paths: list[str], texts: list[str]) -> tuple[list[str], int]:
+    """Files currently matching and the number of commits that touched a path
+    or contain one of the literal texts (for the dry-run report)."""
+    files = []
+    for p in paths:
+        out = run(["git", "ls-tree", "-r", "--name-only", "HEAD", "--", p], mirror, check=False).stdout.split()
+        files.extend(out)
+    commits = set()
+    if paths:
+        commits.update(run(["git", "log", "--all", "--format=%H", "--", *paths], mirror, check=False).stdout.split())
+    for t in texts:
+        commits.update(run(["git", "log", "--all", "--format=%H", "-S", t], mirror, check=False).stdout.split())
+    return sorted(set(files)), len(commits)
+
+
+def literals(replace_file: Path | None) -> list[str]:
+    if not replace_file:
+        return []
+    out = []
+    for line in replace_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("regex:") or line.startswith("glob:"):
+            continue
+        out.append(line.split("==>", 1)[0].removeprefix("literal:"))
+    return out
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--repo", required=True, help="OWNER/NAME of the content repo")
+    ap.add_argument("--path", action="append", default=[], help="path to remove from all history (repeatable)")
+    ap.add_argument("--replace-text", type=Path, help="git-filter-repo replace-text file")
+    ap.add_argument("--workdir", type=Path, help="where to put the mirror and the backup (default: a new temp dir)")
+    ap.add_argument("--execute", action="store_true", help="really rewrite and force-push (default: dry run)")
+    ap.add_argument("--skip-admin-check", action="store_true", help=argparse.SUPPRESS)  # tests only
+    args = ap.parse_args(argv)
+
+    if not args.path and not args.replace_text:
+        ap.error("give at least one --path or --replace-text")
+    if args.repo.endswith("/wintermute-brain"):
+        ap.error("this is the code repo; erasure applies to content repos")
+    if not args.skip_admin_check and not is_admin(args.repo):
+        print(f"refused: you are not an admin of {args.repo}. Erasure is admin-only (06 § 7a).")
+        return 3
+    if args.execute and not shutil.which("git-filter-repo") and run(["git", "filter-repo", "--version"], check=False).returncode != 0:
+        print("git-filter-repo is required (pip install git-filter-repo).")
+        return 3
+
+    work = args.workdir or Path(tempfile.mkdtemp(prefix="brain-erase-"))
+    work.mkdir(parents=True, exist_ok=True)
+    mirror = work / "mirror.git"
+    source = args.repo if "://" in args.repo or Path(args.repo).exists() else f"https://github.com/{args.repo}.git"
+    if mirror.exists():
+        shutil.rmtree(mirror)
+    run(["git", "clone", "--quiet", "--mirror", source, str(mirror)])
+
+    texts = literals(args.replace_text)
+    files, n_commits = affected(mirror, args.path, texts)
+    print(f"repo:      {args.repo}")
+    print(f"paths:     {', '.join(args.path) or '-'}")
+    print(f"texts:     {len(texts)} literal(s) from {args.replace_text}" if args.replace_text else "texts:     -")
+    print(f"files now: {len(files)}" + "".join(f"\n  {f}" for f in files[:50]))
+    print(f"commits that will be rewritten (at least): {n_commits}")
+    if not args.execute:
+        print("\nDRY RUN: nothing changed. Re-run with --execute to rewrite and force-push.")
+        return 0
+
+    answer = input(f"\nThis rewrites the history of {args.repo} for everyone. Type the repo name to continue: ")
+    if answer.strip() != args.repo:
+        print("aborted.")
+        return 1
+
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = work / f"erase-backup-{stamp}.bundle"
+    run(["git", "bundle", "create", str(backup), "--all"], mirror)
+    print(f"backup: {backup}  (holds the erased data: delete it once the result is verified)")
+
+    cmd = ["git", "filter-repo", "--force"]
+    for p in args.path:
+        cmd += ["--path", p]
+    if args.path:
+        cmd.append("--invert-paths")
+    if args.replace_text:
+        cmd += ["--replace-text", str(args.replace_text.resolve())]
+    run(cmd, mirror)
+    # filter-repo removes the origin remote as a safety measure; restore it.
+    run(["git", "remote", "add", "origin", source], mirror, check=False)
+    left, _ = affected(mirror, args.path, texts)
+    if left:
+        print(f"still present after rewrite: {left}; not pushing.")
+        return 1
+    push = run(["git", "push", "--force", "--mirror", "origin"], mirror, check=False)
+    if push.returncode != 0:
+        print("force-push refused (the ruleset allows it for admins only):\n" + push.stderr.strip())
+        print(f"the rewritten mirror is in {mirror}; nothing on GitHub changed.")
+        return 1
+    print(json.dumps({"rewritten": True, "repo": args.repo, "backup": str(backup)}, indent=1))
+    print("\nNext steps (admin/README.md): close open PRs, ask GitHub Support to purge PR refs and LFS objects,"
+          " tell members to re-clone, re-clone on the server, delete the backup after verifying.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -23,16 +23,19 @@ history is the log (`$T/log`).
 
 | Setting | Env var | Default |
 |---|---|---|
-| local clone of the brain content | `BRAIN_DIR` | `~/wintermute-brain-content-slds` |
+| local clone of the brain content | `BRAIN_DIR` | `~/brain/wintermute-brain-content-slds` |
 | GitHub repo of the content | `BRAIN_REPO` | `slds-lmu/wintermute-brain-content-slds` |
 | the brain tools | `$T` | `<this skill's base directory>/../../tools` |
 | your person slug (`first-last`) | `BRAIN_PERSON` | from `git config user.name` |
 | search server (qmd MCP) | `BRAIN_QMD_URL` | `http://localhost:8181/mcp` |
 
-Query works without a clone when the `brain-search` MCP server is reachable.
-Ingest, edit and lint need the clone, over HTTPS and with LFS downloads
-skipped: `GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/<BRAIN_REPO>.git`. If `BRAIN_DIR` is missing, tell the user
-how to clone it and stop.
+**Get the settings first** with `python3 "$T/../../bin/brain" --settings`.
+It prints them from the member's settings file
+(`~/.config/brain/config.toml`), which is authoritative; environment
+variables can be stale (shell startup files may override them). Never dump
+the whole environment: it holds the token. If the command fails or the
+folder in `BRAIN_DIR` does not exist, the member has not run `setup-brain`:
+tell them to run it once and to start work with `brain`, and stop.
 
 **The tools ship with this plugin** (code and content are separate repos,
 01 § 1). Before running any of them, set `T` to the plugin's `tools/` folder:
@@ -169,6 +172,13 @@ and claims, then state one disposition in the commit:
 - **No material** — adds nothing beyond the wiki. Write only the raw item and
   its summary page, nothing else, and say so (`--disposition "No material"`).
 
+**Scope.** Before triage, read the content repo's `scope.md` (what belongs
+into this brain and what does not). If the source is out of scope or at the
+edge, still ingest it, but flag its summary page and any page you create only
+for it: add the tag `scope-check` and put one line at the top of the body,
+`> **Scope check:** <short reason>`. Lint lists flagged pages until a human
+decides. Never update existing pages with out-of-scope content.
+
 New, Update and Disputed may combine; No material is exclusive. Do not force
 pages out of a thin source.
 
@@ -198,6 +208,16 @@ disagreement between sources keeps both claims under the claim:
 > A reports 92% [A](/wiki/paper/a.md); B reports 85% on the same benchmark [B](/wiki/paper/b.md).
 ```
 
+- **Resolving a dispute** (03 § 5.4): if the new source *explicitly*
+  corrects or replaces the source of one side of an open `Status: Disputed`
+  block (an erratum, a retraction, the final version of a preprint), resolve
+  it yourself: keep the corrected claim with its citation, remove the block,
+  and give the reason (`--reason "page/x: dispute resolved, B is the
+  published version of preprint A"`). Otherwise never resolve a dispute;
+  you may only propose a resolution in a lint report.
+- **The assistant's contributions stay marked:** content a source marks as
+  the assistant's calculation, suggestion or judgment (session digests)
+  never becomes a plain fact, decision or result on a page; keep the mark.
 - **Research topics:** also record the opposing side found in the sources at
   hand (failures, criticism, failed replications).
 - **Failed ideas:** a page tagged `idea` that records an abandoned or failed
@@ -231,6 +251,11 @@ otherwise. The same holds for `compile:` and `edit:`.
    digest hook captures new knowledge from this conversation into `raw/`.
 
 ## Edit (`/brain-edit <request>`) — writes wiki/
+
+To resolve a dispute on a human's request ("resolve the dispute on page X: B
+holds because …"), keep the claim that holds with its citation, remove the
+`Status: Disputed` block, and pass the human's reason as `--reason`.
+
 
 A change a human asks for (fix a claim, merge two pages, deprecate a page,
 retag). Follow the write path with `-m "edit: <what>"`. Keep citations

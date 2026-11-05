@@ -7,6 +7,7 @@ Run: python3 -m unittest discover -s tests -v
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -254,6 +255,27 @@ class LintGitTest(Temp):
         git(["commit", "--quiet", "-am", "edit: agent line"], self.root, env=agent)
         self.edit("wiki/page/llm-wiki.md", "Agent-written line.", "")
         self.assertEqual(self.lint("--base", "HEAD", "--agent", "brain-agent-interactive").returncode, 0)
+
+    def test_disputed_block_listed_with_age(self):
+        self.edit("wiki/page/llm-wiki.md", "## Related", "> **Status: Disputed**\n> A says 1 [a](/wiki/paper/karpathy-2026-llm-wiki.md).\n\n## Related")
+        git(["commit", "--quiet", "-am", "edit: dispute"], self.root,
+            env={"GIT_AUTHOR_DATE": "2026-01-01T12:00:00", "GIT_COMMITTER_DATE": "2026-01-01T12:00:00"})
+        r = self.lint()
+        self.assertIn("open Status: Disputed block, open for", r.stdout)
+        self.assertNotIn("error", r.stdout.split("disputed")[0][-200:])
+
+    def test_scope_check_flag_is_listed(self):
+        self.edit("wiki/page/llm-wiki.md", "tags: [", "tags: [scope-check, ")
+        self.edit("wiki/page/llm-wiki.md", "## Definition", "> **Scope check:** looks like a hobby topic\n\n## Definition")
+        r = self.lint()
+        self.assertIn("scope-check", r.stdout)
+        self.assertIn("looks like a hobby topic", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout)   # a flag is a warning, not an error
+
+    def test_missing_scope_file_is_info(self):
+        (self.root / "scope.md").unlink()
+        r = self.lint()
+        self.assertIn("no scope.md", r.stdout)
 
     def test_stale_person_page(self):
         r = self.lint()
@@ -513,6 +535,81 @@ class WaitForMergeTest(unittest.TestCase):
 
 # --- session digests: long backlogs are split (live test 2026-11-05) ------------
 
+class SessionNoticeTest(unittest.TestCase):
+    def test_session_start_shows_capture_notice(self):
+        # 06 § 7a PD3: a visible one-line notice at every session start
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_REPO="slds-lmu/test-content",
+                       BRAIN_CAPTURE=tmp)
+            payload = json.dumps({"session_id": "s1", "transcript_path": "/nonexistent", "cwd": tmp})
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            msg = json.loads(r.stdout)["systemMessage"]
+            self.assertIn("captured into slds-lmu/test-content", msg)
+            self.assertIn("BRAIN_SESSION_DIGEST=off", msg)
+            env["BRAIN_SESSION_DIGEST"] = "off"
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            self.assertEqual(r.stdout.strip(), "")
+
+
+class CaptureScopeTest(unittest.TestCase):
+    def test_only_listed_folders_are_captured(self):
+        # user test N6: with --plugin-dir every session was captured
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bs", ROOT / "plugin" / "scripts" / "brain_session.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            brain = Path(tmp) / "brain"
+            (brain / "sub").mkdir(parents=True)
+            other = Path(tmp) / "other"
+            other.mkdir()
+            os.environ["BRAIN_CAPTURE"] = str(brain)
+            try:
+                self.assertTrue(mod.captured(str(brain)))
+                self.assertTrue(mod.captured(str(brain / "sub")))
+                self.assertFalse(mod.captured(str(other)))
+                os.environ["BRAIN_CAPTURE"] = ""
+                self.assertFalse(mod.captured(str(brain)))
+            finally:
+                os.environ.pop("BRAIN_CAPTURE", None)
+
+    def test_hook_silent_outside_captured_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_CAPTURE="")
+            payload = json.dumps({"session_id": "s1", "transcript_path": "/nonexistent", "cwd": tmp})
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            self.assertEqual(r.stdout.strip(), "")
+
+
+class BrainConfigTest(unittest.TestCase):
+    def test_config_roundtrip_and_session_env(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("bc", ROOT / "bin" / "brain_common.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as tmp:
+            tok = Path(tmp) / "token"
+            tok.write_text("secret-token\n")
+            cfg = {"person": "jane-doe", "repo": "org/content", "dir": f"{tmp}/content",
+                   "code_dir": f"{tmp}/code", "login": "token", "token_file": str(tok),
+                   "search_url": "", "capture": [f"{tmp}/content", f"{tmp}/proj"]}
+            path = Path(tmp) / "config.toml"
+            mod.write_config(cfg, path)
+            self.assertEqual(oct(path.stat().st_mode)[-3:], "600")
+            loaded = mod.load_config(path)
+            self.assertEqual(loaded, cfg)
+            env = mod.session_env(loaded, base={})
+            self.assertEqual(env["BRAIN_REPO"], "org/content")
+            self.assertEqual(env["BRAIN_PERSON"], "jane-doe")
+            self.assertEqual(env["GH_TOKEN"], "secret-token")
+            self.assertEqual(env["BRAIN_CAPTURE"].split(os.pathsep), [f"{tmp}/content", f"{tmp}/proj"])
+            loaded["login"] = "gh"
+            self.assertNotIn("GH_TOKEN", mod.session_env(loaded, base={}))
+
+
 class DigestPiecesTest(unittest.TestCase):
     def test_backlog_split_into_turn_pieces(self):
         import importlib.util
@@ -531,6 +628,53 @@ class DigestPiecesTest(unittest.TestCase):
         for (a, b), (c, _) in zip(ps, ps[1:]):
             self.assertEqual(b + 1, c)
         self.assertEqual(mod.pieces(records, 1, 10, turns=20), [(1, 10)])
+
+
+
+# --- admin/erase: safety (06 § 7a, PD2) ------------------------------------------
+
+class EraseSafetyTest(unittest.TestCase):
+    """The erasure tool must refuse non-admins, default to a dry run and
+    never touch the code repo. The rewrite itself needs git-filter-repo."""
+
+    ERASE = ROOT / "admin" / "erase"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = copy_fixture(Path(self.tmp.name) / "brain")
+        init_repo(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def erase(self, *args, env=None):
+        return run([PY, str(self.ERASE), *args], cwd=self.root, env=env)
+
+    def test_not_shipped_with_plugin(self):
+        self.assertFalse((ROOT / "plugin" / "tools" / "erase").exists())
+
+    def test_refuses_non_admin(self):
+        # a fake gh that reports no admin permission
+        fake = Path(self.tmp.name) / "bin"
+        fake.mkdir()
+        (fake / "gh").write_text("#!/bin/sh\necho false\n")
+        (fake / "gh").chmod(0o755)
+        r = self.erase("--repo", "slds-lmu/x", "--path", "raw/", env={"PATH": f"{fake}:{os.environ['PATH']}"})
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not an admin", r.stdout)
+
+    def test_refuses_code_repo(self):
+        r = self.erase("--repo", "slds-lmu/wintermute-brain", "--path", "raw/", "--skip-admin-check")
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_dry_run_reports_and_changes_nothing(self):
+        before = git(["rev-parse", "HEAD"], self.root).stdout
+        r = self.erase("--repo", str(self.root), "--path", "raw/web/", "--skip-admin-check",
+                       "--workdir", str(Path(self.tmp.name) / "work"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("DRY RUN", r.stdout)
+        self.assertIn("raw/web/2026/src-20261029-denser-llm-wiki-survey/page.md", r.stdout)
+        self.assertEqual(git(["rev-parse", "HEAD"], self.root).stdout, before)
 
 
 if __name__ == "__main__":

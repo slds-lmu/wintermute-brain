@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""brain — start a Claude Code session with the brain (06 § 2.1).
+
+Updates the code copy to the latest `main`, sets the brain settings from
+~/.config/brain/config.toml for this session only (and, in token mode,
+the brain's token), and starts Claude Code with the brain plugin. All
+arguments are passed on to Claude Code, e.g. `brain -p "…"`.
+
+    brain            start Claude Code with the brain
+    brain --check    check the setup without starting Claude Code
+    brain --settings print the brain settings (from the config file, no token)
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brain_common import expand, load_config, session_env  # noqa: E402
+
+
+def check(cfg: dict, env: dict) -> int:
+    """Self-check: the things the first user test tripped over."""
+    ok = True
+
+    def report(good: bool, what: str, hint: str = "", optional: bool = False) -> None:
+        nonlocal ok
+        if not optional:
+            ok &= good
+        label = "  ok    " if good else ("  note  " if optional else "  FAIL  ")
+        print(label + what + ("" if good else f"\n        → {hint}"))
+
+    repo, content = env["BRAIN_REPO"], Path(env["BRAIN_DIR"])
+    for tool in ("git", "gh", "claude"):
+        report(shutil.which(tool) is not None, f"{tool} installed", f"install {tool}")
+    report(shutil.which("gitleaks") is not None, "gitleaks installed (optional)",
+           "not installed: a built-in secret scan is used instead", optional=True)
+    r = subprocess.run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.push"], env=env,
+                       capture_output=True, text=True)
+    report(r.stdout.strip() == "true", f"write access to {repo}",
+           "the login (gh or the brain token) cannot write to the content repo; check its repository access")
+    report((content / ".git").exists(), f"content clone at {content}", "run setup-brain again")
+    if (content / ".git").exists():
+        r = subprocess.run(["git", "-C", str(content), "fetch", "--quiet", "origin"], env=env,
+                           capture_output=True, text=True)
+        report(r.returncode == 0, "git can reach the content repo with the same login",
+               r.stderr.strip()[:200] or "git fetch failed")
+    print("setup OK" if ok else "setup has problems (see FAIL above)")
+    return 0 if ok else 1
+
+
+def main(argv: list[str]) -> int:
+    cfg = load_config()
+    env = session_env(cfg)
+    code = expand(cfg["code_dir"])
+    if argv[:1] == ["--check"]:
+        return check(cfg, env)
+    if argv[:1] == ["--settings"]:
+        # Read by the skill instead of environment variables, which shell
+        # startup files can override (user test N22). Never prints the token.
+        for key in ("BRAIN_DIR", "BRAIN_REPO", "BRAIN_PERSON", "BRAIN_QMD_URL", "BRAIN_CAPTURE"):
+            print(f"{key}={env.get(key, '')}")
+        return 0
+    # Latest code and current content (06 § 2.1); a failed update is not fatal.
+    for what, repo in (("code", code), ("brain content", Path(env["BRAIN_DIR"]))):
+        r = subprocess.run(["git", "-C", str(repo), "pull", "--quiet", "--ff-only"],
+                           env=dict(env, GIT_LFS_SKIP_SMUDGE="1"), capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"brain: could not update the {what} ({r.stderr.strip()[:120]}); using the local copy",
+                  file=sys.stderr)
+    claude = shutil.which("claude")
+    if not claude:
+        sys.exit("brain: Claude Code (claude) not found")
+    os.execve(claude, [claude, "--plugin-dir", str(code / "plugin"), *argv], env)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

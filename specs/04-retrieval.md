@@ -16,7 +16,7 @@ Research: `research/C-retrieval.md`.
 | Generated indexes | root `index.md` + one per type folder, one line per page from `description` | 01 § 7 (P3) |
 | qmd | search over wiki pages and `raw/` text; one central instance on the GPU server, reached via MCP | 01 § 7 (Q2), 06 § 3 |
 | Fallback | indexes + grep on a local clone, when qmd is unreachable | 06 § 3 |
-| Access | per-person login: only people with read access to the brain repo | 06 § 3 (Q9) |
+| Access | per-person login: only people with read access to the content repo | 06 § 3 (Q9) |
 | Models | local only, no external embedding API | Q5 |
 
 qmd's index lives outside git and is rebuilt from the repo; the server
