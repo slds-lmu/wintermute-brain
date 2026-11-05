@@ -12,7 +12,9 @@ open question **[O#]**. Open questions have a recommendation and wait
 for the owner.
 
 The rules go into the forked v0 skill (`SKILL.md`). The scripts live
-in `tools/`.
+in the code repo's `plugin/tools/` and ship with the plugin (01 § 1);
+`tools/…` in the specs means that folder. They run inside a clone of a
+content repo and work on it.
 
 ## 0. What each operation writes
 
@@ -103,9 +105,11 @@ locked pages.
 
 Local hooks can be skipped, so GitHub enforces the same rules before
 anything lands on `main`. Every agent operation is **one pull request
-with auto-merge**. Branch protection on `main` requires the check.
+with auto-merge**. A ruleset on `main` requires the check.
 
-- **Required check** (GitHub Actions, runs `tools/lint` and the
+- **Required check**: the content repo calls the code repo's reusable
+  workflow `brain-check` at the pinned release, which checks
+  `.brain-version` against it and runs `tools/lint` and the
   `commit-op` preconditions against the current `main`):
   - mechanical lint (§ 5.1);
   - files changed in the PR are unchanged on `main` since the PR's
@@ -122,7 +126,8 @@ with auto-merge**. Branch protection on `main` requires the check.
   human-line rules don't apply to human commits). Only the index
   Action, via the brain GitHub App, may push to `main`. Enforced by a
   ruleset on `main`: required check `check`, no force-push, no
-  deletion, bypass only for the brain GitHub App.
+  deletion, bypass only for the brain GitHub App (during the test
+  phase also repository admins, `parked.md` K31).
 - Each operation takes a few minutes, and parallel operations queue.
   If queues get long, GitHub's merge queue may help (availability for
   our plan is [unverified]).
@@ -198,7 +203,8 @@ folder via the shared id (01 § 3).
    knowledge from a query conversation reaches the wiki the normal
    way: the conversation is a Claude Code session, so its digest goes
    into `raw/` (02 § 2), and the worker compiles it into `wiki/`. The
-   brain repo opts in to session digests for this.
+   content repo opts in to session digests for this; the code repo
+   never does (01 § 1).
 
 ## 5. Lint
 
@@ -242,7 +248,7 @@ Run by an agent on request (later R11). Reports only.
 
 Interactive runs show their findings in the session. Everything that
 runs **unattended** reports to **one standing GitHub issue, "Brain
-health"**, in the brain repo:
+health"**, in each content repo:
 
 - one comment per event: a scheduled or CI lint run with findings, or
   a failed operation (gave up after 3 attempts, or its PR failed),

@@ -284,10 +284,10 @@ leading `/`:
   both forms, but GitHub resolves the slash-less form relative to the
   current file, which breaks it. **Lint normalises** every internal
   link starting with `wiki/` or `raw/` to `/wiki/…` / `/raw/…`. This is
-  a safe auto-fix, run as a pre-commit hook and in CI.
-- To verify once in Obsidian: a leading `/` resolves from the vault
-  root, and backlinks and the graph work (forum reports say yes; it is
-  not officially documented).
+  a safe auto-fix, applied by `commit-op` and by the index Action on
+  `main` (implementation decision 4).
+- **Verified in Obsidian** (2026-11-05): a leading `/` resolves from
+  the vault root, and backlinks work.
 - Wikilinks (`[[slug]]`) were evaluated and set aside: they are not
   clickable on GitHub and are invisible to OKF tools.
 
@@ -364,7 +364,7 @@ earlier D4; follows OKF § 8).
     server; `qmd search` (BM25, no models) stays as the cheap mode. The Mattermost bot uses the same instance
     over HTTP.
   - **Derived index:** SQLite outside git, rebuildable anytime.
-    A `post-merge` git hook runs `qmd update`.
+    The server worker re-indexes after every pull (06 § 4).
   - **No dependency:** the search procedure is "use qmd if available,
     else index + grep". The wiki stays fully usable without it.
   - **Pin the version** (fast-moving v2). Trial it once on a

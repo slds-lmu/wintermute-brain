@@ -15,7 +15,7 @@ and backup. All points below were decided by the owner on 2026-11-05
 |---|---|
 | **Member's machine** | Claude Code with the brain plugin: ingest / query / lint commands, session hooks, digest agent (02 § 2) |
 | **Group GPU server** | compile worker (02 § 2.4), central qmd (§ 3), PDF conversion; later the Mattermost bot |
-| **GitHub** (`slds-lmu`) | brain repo, required check on PRs, index Action, "Brain health" issue (03 § 2.1, § 5.3) |
+| **GitHub** (`slds-lmu`) | code repo (releases, reusable workflows) and content repo (required check on PRs, index Action, "Brain health" issue; 03 § 2.1, § 5.3) |
 
 Members' machines do only what needs their local context (their
 sessions) or their command. Heavy work (GPU, models, PDF conversion)
@@ -54,7 +54,7 @@ and the record.
   generated indexes plus grep on the local clone. Nothing depends on
   qmd (CLAUDE.md, tool independence).
 - **Access (Q9): per-person login.** Only people with read access to
-  the brain repo may query. Sketch: an auth proxy in front of qmd's
+  the content repo may query. Sketch: an auth proxy in front of qmd's
   MCP endpoint checks the caller's GitHub token against the repo's
   permissions. With one repo per tier later, the same check gives
   per-tier access.
@@ -62,14 +62,18 @@ and the record.
 
 ## 4. The server worker (Q4, Q5)
 
-- **Polling every 5 minutes:** pull `main`; compile raw items without a
-  summary page, one at a time (03 § 3); re-index qmd. No webhook, so
+- **Polling every 5 minutes:** pull the content repo's `main`; check
+  out the code repo at the release pinned in `.brain-version`; compile
+  raw items without a summary page, one at a time and oldest first
+  (03 § 3); re-index qmd. No webhook, so
   the server needs no inbound access from the internet.
-- **GitHub access: a GitHub App** installed on the brain repo only,
-  with the rights to open PRs and comment on the "Brain health" issue.
+- **GitHub access: a GitHub App** (`wintermute-brain`) installed on
+  the code repo and the content repo only, with the rights to open PRs
+  and comment on the "Brain health" issue; it is also the ruleset's
+  bypass actor for the index Action.
   No seat, short-lived tokens. Its commits carry the git author
   `brain-agent-compile` (03 § 6.1).
-- **State:** a clone of the repo and qmd's index, both rebuildable from
+- **State:** clones of the content and code repos and qmd's index, all rebuildable from
   GitHub. The worker keeps no state of its own (02 § 2.4).
 
 ## 5. Model access and cost (Q6)
@@ -94,8 +98,8 @@ and the record.
 
 ## 7. Backup (Q8)
 
-- **GitHub only for now, plus branch protection on `main`:** no
-  force-push, no deletion.
+- **GitHub only for now, plus the ruleset on `main`:** no force-push,
+  no deletion.
 - **Priority for later** (`parked.md` K30): a full mirror (incl. LFS)
   outside GitHub, e.g. on the server, whose disk is covered by the
   university backup.
