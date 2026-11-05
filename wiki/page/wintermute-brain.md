@@ -18,7 +18,9 @@ Distribution: the brain ships as a Claude Code plugin from the wintermute market
 
 Server: the worker polls every 5 minutes (pull, compile new raw items, re-index qmd), so no inbound access is needed. It authenticates as a GitHub App installed on the brain repo only, with short-lived tokens. Members use their own Claude accounts; the server uses a group Anthropic API key with a monthly spending limit, to be set after measuring the first weeks [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
 
-Storage: PDFs stay in git LFS; member clones skip LFS downloads and only the server fetches PDFs. Backups are GitHub only, plus branch protection on `main`; an off-GitHub backup is parked as priority K30 [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
+Storage: PDFs stay in git LFS; member clones skip LFS downloads and only the server fetches PDFs. Backups are GitHub only, plus branch protection on `main` (planned; the ruleset is deferred, see Merge method); an off-GitHub backup is parked as priority K30 [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
+
+Retrieval and commands: search is hybrid from the MVP, not keyword-only first, because session digests are worded differently from later questions. Answers use both wiki pages and raw sources and say which parts come from which. The `wiki/page/` index is split by first letter. Commands are `/brain-ingest`, `/brain-ask`, `/brain-edit`, `/brain-lint`. Querying works from any repo with the plugin through the server's qmd; a local clone is optional (offline fallback, editing), while ingest and edit use a local working copy [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
 
 ## Reporting and commit identity
 
@@ -30,6 +32,16 @@ Agent commits use a dedicated author per agent kind (e.g. `brain-agent-compile`)
 
 The owner chose rebase-and-merge as a trial, to keep one commit per operation in a linear history; merge commits are the fallback [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
 
+Nobody pushes directly to `main`, humans included; everyone uses PRs. The only exception is the index Action, which needs the brain GitHub App (not created yet). The ruleset is deferred: not blocking for a first test, but necessary before unattended agents or other members join, and it has to come together with the GitHub App [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+
+## Implementation status
+
+Marc's PR #1 (`d0cd9e1`) implemented the MVP from specs 00–06; 38 tests pass and lint reports 0 errors and 0 warnings. The `check` and `index` workflows ran green on GitHub. Not done: branch protection or ruleset, the GitHub App, qmd pinning, and a real-transcript test of the session hook [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+
+## GitHub tokens
+
+A fine-grained PAT has one resource owner, so each owner needs its own token. Tokens live in `~/.gh-tokens/<name>` and are mounted read-only into yolobox; `ghr <name> …` and `gitr <name> …` run `gh` or `git` with that token. For this repo a token needs Actions read; `slds-write` is scoped to this repo [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+
 ## Open checks
 
-LFS limits of the `slds-lmu` plan, GitHub Actions minutes for a private repo, and who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
+LFS limits of the `slds-lmu` plan, GitHub Actions minutes for a private repo, and who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open: the PDF converter benchmark, qmd at scale, and the Obsidian link check [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
