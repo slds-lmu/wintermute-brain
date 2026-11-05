@@ -7,6 +7,7 @@ Run: python3 -m unittest discover -s tests -v
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -525,6 +526,23 @@ class WaitForMergeTest(unittest.TestCase):
 
 
 # --- session digests: long backlogs are split (live test 2026-11-05) ------------
+
+class SessionNoticeTest(unittest.TestCase):
+    def test_session_start_shows_capture_notice(self):
+        # 06 § 7a PD3: a visible one-line notice at every session start
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, XDG_CACHE_HOME=tmp, HOME=tmp, BRAIN_REPO="slds-lmu/test-content")
+            payload = json.dumps({"session_id": "s1", "transcript_path": "/nonexistent", "cwd": tmp})
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            msg = json.loads(r.stdout)["systemMessage"]
+            self.assertIn("captured into slds-lmu/test-content", msg)
+            self.assertIn("BRAIN_SESSION_DIGEST=off", msg)
+            env["BRAIN_SESSION_DIGEST"] = "off"
+            r = subprocess.run(["bash", str(ROOT / "plugin" / "scripts" / "brain-session.sh"), "start"],
+                               input=payload, capture_output=True, text=True, env=env)
+            self.assertEqual(r.stdout.strip(), "")
+
 
 class DigestPiecesTest(unittest.TestCase):
     def test_backlog_split_into_turn_pieces(self):

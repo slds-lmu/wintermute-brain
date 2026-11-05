@@ -104,7 +104,7 @@ and the record.
   outside GitHub, e.g. on the server, whose disk is covered by the
   university backup.
 
-## 7a. Personal data (K27) — **draft, open questions PD1–PD4**
+## 7a. Personal data (K27, decided 2026-11-05)
 
 Not a legal opinion. The brain processes personal data: person pages,
 names in digests and pages, later meeting transcripts, chat and mail.
@@ -123,14 +123,16 @@ history, in LFS, in backups and in every member's clone.
 
 **Proposal:**
 
-1. **Minimise at the door.** Do not ingest special categories (health,
-   religion, union membership, …), evaluations of people, or private
-   communication between individuals. Prefer digests over full
+1. **Minimise at the door** (PD4): no fixed list of refused content;
+   what belongs into a brain is defined by its `scope.md`, and anything
+   outside is flagged and linted (01 § 2.1). Prefer digests over full
    transcripts for any new channel (meetings, chat, mail).
-2. **Inform and opt out.** Members are told what the brain captures
-   (tutorial, README): which repos opt in to session digests, that
+2. **Inform and opt out** (PD3): members are told what the brain
+   captures (tutorial, content README): which repos opt in, that
    digests keep decisions and findings with names, and how to switch
-   capture off per session. Anyone can ask to be removed.
+   capture off. **Every captured session starts with a one-line notice**
+   ("Brain: this session is captured into … Off for one session:
+   BRAIN_SESSION_DIGEST=off"). Anyone can ask to be removed.
 3. **Removal on request**, in two steps: first remove the content from
    the current pages (an `edit`, immediately); then, if the person asks
    for erasure, remove it from the history too (rewrite the content
@@ -148,8 +150,8 @@ history, in LFS, in backups and in every member's clone.
 |---|---|---|
 | PD1 | Involve the LMU data protection officer, and when? | **decided (owner, 2026-11-05): no further step; the owner has already talked to him** |
 | PD2 | Erasure requests: rewrite git history, or only remove from current pages? | **decided (owner, 2026-11-05): rewrite history, admin-only** via `admin/erase` and its runbook; members and agents cannot do it |
-| PD3 | How are members informed and how do they opt out? | **notice in tutorial and README**; capture off per session; removal on request |
-| PD4 | What is never ingested? | **special categories, evaluations of people, private communication** between individuals |
+| PD3 | How are members informed and how do they opt out? | **decided (owner, 2026-11-05): notice in tutorial and README, plus a one-line notice at every captured session start**; capture off per session; removal on request |
+| PD4 | What is never ingested? | **decided (owner, 2026-11-05): no fixed list**; each brain's `scope.md` decides, with flagging and lint (01 § 2.1) |
 
 ## 8. Still open
 

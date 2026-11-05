@@ -45,6 +45,8 @@ MINUTES = int(os.environ.get("BRAIN_DIGEST_MINUTES", "30"))
 MIN_TURNS_FLUSH = 3            # a flush at session end/start needs at least this much
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "brain"
 LOG = CACHE / "digest.log"
+NOTICE = ("Brain: this session is captured into {repo} (decisions, findings, failed approaches, "
+          "open questions; names included). Off for one session: BRAIN_SESSION_DIGEST=off.")
 AGENT = "brain-agent-digest"
 AGENT_EMAIL = "brain-agent-digest@agents.invalid"
 MAX_CHARS = 120_000            # transcript budget handed to the digest model
@@ -248,6 +250,9 @@ def hook(event: str) -> None:
         if transcript.is_file() and session_id:
             consider(transcript, session_id, cwd, flush=(event == "end"))
     elif event == "start":
+        # Tell the person that this session is captured (06 § 7a, PD3). Claude
+        # Code shows a hook's `systemMessage` to the user.
+        print(json.dumps({"systemMessage": NOTICE.format(repo=REPO)}), flush=True)
         # Older sessions of this repo with an undigested tail (closed window, crash).
         cutoff = time.time() - 30 * 86400
         for t in project_transcripts(cwd):

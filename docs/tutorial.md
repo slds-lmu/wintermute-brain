@@ -167,6 +167,12 @@ is.
   with the plugin loaded. Decisions and findings flow in by themselves.
   Say *why* when you decide something; the reason is what makes a
   digest useful later.
+- **What session capture keeps, and how to say no:** decisions,
+  findings, failed approaches and open questions, *with names*; never
+  code, chatter, personal remarks or secrets. Every captured session
+  starts with a one-line notice. Switch it off for a session, or don't
+  enable the plugin in a repo. You can ask the owner to remove content
+  about you, including from the history.
 - **Scope:** research, leadership and organisation, teaching. Not
   private life.
 
