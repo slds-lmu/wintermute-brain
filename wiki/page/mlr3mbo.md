@@ -41,5 +41,5 @@ Native multi-fidelity and multi-information-source BO is planned
 
 - Code: https://github.com/mlr-org/mlr3mbo/ (also on CRAN)
 - Paper: [mlr3mbo: Bayesian Optimization in R](/wiki/paper/becker-2026-mlr3mbo.md)
-- People: Marc Becker, Lennart Schneider, Martin Binder, Lars Kotthoff,
+- People: [Marc Becker](/wiki/person/marc-becker.md), Lennart Schneider, Martin Binder, Lars Kotthoff,
   Bernd Bischl (authors of the paper)

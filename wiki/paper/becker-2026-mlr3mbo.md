@@ -4,7 +4,7 @@ title: "mlr3mbo: Bayesian Optimization in R"
 description: "Introduces mlr3mbo, a modular R toolbox for Bayesian optimization, with tuned defaults that match HEBO, SMAC3, Ax and Optuna."
 authors: [Marc Becker, Lennart Schneider, Martin Binder, Lars Kotthoff, Bernd Bischl]
 year: 2026
-venue: "arXiv preprint"
+venue: "Patterns"
 doi: ""
 arxiv: "2603.29730"
 tags: [bayesian-optimization, hpo, automl, r, software, mlr3]
@@ -100,6 +100,10 @@ its defaults; four of the five authors are at LMU Munich. Code and results
 for the experiments are in https://github.com/mlr-org/mbo_config, archived on
 Zenodo [mlr3mbo paper](/wiki/paper/becker-2026-mlr3mbo.md).
 
+The paper is published in *Patterns* 7, 101614 (2026)
+[Marc Becker (SLDS profile page)](/wiki/source/src-20261105-slds-marc-becker.md).
+
 ## Related
 
 - [mlr3mbo](/wiki/page/mlr3mbo.md)
+- [Marc Becker](/wiki/person/marc-becker.md)
