@@ -245,9 +245,12 @@ leading `/`:
 - **Plain Markdown only:** no wikilinks, embeds (`![[…]]`), callouts
   or block IDs. Agents must not slip into Obsidian syntax. Obsidian is
   an optional viewer, not a dependency (decided 2026-10-29).
-- **Obsidian setup:** open the repo root as the vault. Under Settings →
-  Files and links, turn off "Use [[Wikilinks]]" and set "New link
-  format" to "Absolute path in vault".
+- **Obsidian setup:** open the repo root as the vault. The repo ships
+  `.obsidian/app.json` (2026-11-05) with "Use [[Wikilinks]]" off
+  (`useMarkdownLinks: true`) and "New link format" = "Absolute path in
+  vault", labelled "Path from vault folder" in newer Obsidian versions
+  (`newLinkFormat: absolute`), so nobody sets this by hand. The
+  rest of `.obsidian/` is personal and git-ignored.
 - **Known Obsidian quirk:** Obsidian writes vault-absolute links
   *without* the leading `/` (`wiki/paper/x.md`) when inserting links,
   and strips the `/` when it rewrites links on rename. Obsidian reads

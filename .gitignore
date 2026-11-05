@@ -3,7 +3,10 @@
 # Derived search index and tool caches; all rebuildable from the repo.
 .qmd/
 .smart-env/
-.obsidian/workspace*.json
+# Obsidian: only the shared vault settings (link format, 01 § 6) are
+# committed; everything else in .obsidian/ is personal.
+.obsidian/*
+!.obsidian/app.json
 __pycache__/
 *.pyc
 .pytest_cache/

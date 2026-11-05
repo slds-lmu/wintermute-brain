@@ -101,11 +101,6 @@ Problems found and how they were handled:
     ingest relies on litdownload (arXiv TeX/HTML) until then.
   - qmd: pick and pin a version (its MCP HTTP flags depend on it); test
     at several thousand files; set up on the server.
-  - Obsidian: do root-absolute `/wiki/...` links resolve?
-  - LFS limits and cost of the `slds-lmu` plan; GitHub Actions minutes
-    (06 § 8).
-  - `.mcp.json` uses `${VAR:-default}` expansion; verify Claude Code
-    expands it, else set `BRAIN_QMD_URL` explicitly.
 - **Not yet tested live:** paper ingest, session digests end to end, the
   server worker, `/brain-lint`, `/brain-edit`.
 - Who administers the server worker and the API key (06 § 8).
@@ -115,3 +110,14 @@ Problems found and how they were handled:
 - **Reasons and plan in every commit** (owner): `commit-op --plan` and
   `--reason`; a change without a reason per changed wiki page is refused
   (ingest, compile, edit). 03 § 3, § 6; skill; compile prompt; tests.
+- **Obsidian works with our links** (Bernd, 2026-11-05): root-absolute
+  `/wiki/...` links resolve and backlinks show. The repo now ships
+  `.obsidian/app.json` with the two link settings (01 § 6); the rest of
+  `.obsidian/` is git-ignored.
+- **Plugin search config is valid:** Claude Code expands `${VAR}` and
+  `${VAR:-default}` in `.mcp.json` `url` and `headers`, also for plugin
+  servers (code.claude.com/docs/en/mcp, checked 2026-11-05). Gotcha: a
+  variable set to the empty string expands to empty, not to the default.
+- **GitHub usage checked** (2026-11-05, 06 § 8.1): Team plan; org-wide
+  Actions and LFS use are inside the included amounts. Watch Actions
+  minutes once session digests run.

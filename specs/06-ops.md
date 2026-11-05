@@ -97,7 +97,27 @@ and the record.
 
 ## 8. Still open
 
-- LFS limits and cost of the `slds-lmu` plan (§ 6).
-- GitHub Actions minutes for a private repo: the required check and
-  the index Action run on every PR and merge. Check the plan's quota.
 - Who administers the server worker and the API key.
+
+### 8.1 GitHub usage (checked 2026-11-05 via the billing API)
+
+`slds-lmu` is on the **Team** plan (307 seats, 182 used). Usage across
+the whole org, Jan–Nov 2026:
+
+| | Typical month | Peak | Billed |
+|---|---|---|---|
+| Actions (all runners) | ~600–1,000 min | 3,217 min (May) | $0 except $4.26 (July) |
+| Git LFS storage | ~5 GB (≈ 3,800 GB-hours) | — | $0 |
+| Git LFS bandwidth | ~0.1 GB | — | $0 |
+
+So today's use is inside the included amounts. The exact included
+quotas are not in the API; check the billing page before scaling up.
+
+**Expected brain load:** each agent operation costs about two short
+Actions runs (the PR check, then the index Action after merge). With
+automatic session digests plus their compile PRs, that could be about
+1,000–2,000 extra minutes a month at group scale [estimate], which
+could push the org past its included minutes. PDFs add a few GB of LFS
+per thousand papers. **Watch the Actions minutes once session digests
+run;** options then are a cheaper check (skip the index Action for
+raw-only PRs) or a self-hosted runner on the group server.
