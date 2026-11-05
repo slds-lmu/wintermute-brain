@@ -248,7 +248,8 @@ def main(argv: list[str]) -> int:
                     help="why a page changed, one per changed page: 'type/slug: why'")
     ap.add_argument("--upstream", default="origin/main")
     ap.add_argument("--no-pr", action="store_true", help="push straight to main (fast-forward) instead of a PR")
-    ap.add_argument("--wait", type=int, default=600, help="seconds to wait for the PR to merge (0 = don't wait)")
+    ap.add_argument("--wait", type=int, default=1200,
+                    help="seconds to wait for the PR to merge (0 = don't wait); default 20 min: GitHub's auto-merge took up to ~9 min in the live test")
     ap.add_argument("--cleanup", action="store_true", help="remove the worktree after success")
     ap.add_argument("--check", action="store_true", help="preconditions only")
     ap.add_argument("--base")

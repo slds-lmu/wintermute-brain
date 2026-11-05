@@ -71,6 +71,8 @@ scratch folder (Marc adds them to the slds docker image).
 | Ingest 2 (web, update): rohitg00's LLM Wiki v2 gist | PR #4; existing page updated, no duplicate; `commit-op` reported "merged" correctly |
 | Index Action via the App | pushed `index: regenerate` after PRs #3 and #4 |
 | Query (by hand, grep fallback) | answer from wiki pages with citations and limits |
+| `/brain-edit`: clean up the project page (personal token section, superseded status lines, wrong attribution) | PR #23 merged, with plan and reason |
+| `/brain-lint` over 18 pages (mechanical, evidence, judgment sample) | 1 orphan; 2 false evidence suspects (ORCID read as dates); 1 overstated claim; missing person pages; no duplicates, no open disputes |
 | Session channel end to end: 7 digests of this design session (02 § 2), then one compile-worker pass run by hand (`server/worker.py --once`, Sonnet, no qmd) | 7 digest PRs (#5–#11) and 7 compile PRs (#12–#21), all merged, no failures; one project page `wintermute-brain` built up by update, never duplicated; others ingested in parallel (#15, #16, #19) without conflicts |
 
 Problems found and how they were handled:
@@ -102,8 +104,9 @@ Problems found and how they were handled:
     ingest relies on litdownload (arXiv TeX/HTML) until then.
   - qmd: pick and pin a version (its MCP HTTP flags depend on it); test
     at several thousand files; set up on the server.
-- **Not yet tested live:** paper ingest, session digests end to end, the
-  server worker, `/brain-lint`, `/brain-edit`.
+- **Not yet tested live:** the session hooks firing on their own (the
+  digest step was run by hand), the server worker on the server. Paper
+  ingest was done by Marc (PR #15).
 - Who administers the server worker and the API key (06 § 8).
 
 ## 6. Changes after the live tests (2026-11-05)
@@ -123,7 +126,9 @@ Problems found and how they were handled:
   Actions and LFS use are inside the included amounts. Watch Actions
   minutes once session digests run.
 - **Session-channel test findings** (2026-11-05, all open):
-  1. **Long backlogs lose their middle.** A first digest of an
+  1. **FIXED (2026-11-05):** a backlog is digested in pieces of ~20 human
+     turns (`pieces()` in `brain_session.py`; test); the run-is-pending
+     flag is cleared only after the last piece. Was: **Long backlogs lose their middle.** A first digest of an
      undigested long session sends at most 60,000 + 60,000 characters
      (head and tail); the middle is cut. Fix: digest a backlog in pieces
      of ~20 turns, as the live hook does.
@@ -147,9 +152,23 @@ Problems found and how they were handled:
   6. **Everything lands on one page.** With no project-specific
      structure, all decisions went onto `wiki/page/wintermute-brain.md`
      (very long). Acceptable for now; watch page length.
-  7. **Auto-merge latency varies** from ~2 to ~9 minutes (PR #18). The
+  7. **PARTLY FIXED (2026-11-05):** `commit-op` waits 20 minutes by
+     default (03 § 2 step 5). Throughput of the single-writer worker is
+     still bounded by merge latency. Was: **Auto-merge latency varies** from ~2 to ~9 minutes (PR #18). The
      10-minute wait in `commit-op` is tight, and the single-writer
      worker's throughput is bounded by it.
   8. **Scope is not checked.** An out-of-scope test source (PR #22,
      polar-bear tracks at a zoo) can be ingested; neither triage nor
      lint enforces 00 § 3.
+- **Lint findings** (2026-11-05):
+  - **FIXED (2026-11-05):** URLs are skipped (test). Was: `check_evidence` reads parts of ORCID ids in URLs as dates
+    (`0000-00`, `8115-04` on `person/marc-becker`). Fix: skip literals
+    inside URLs.
+  - `page/mlr3mbo` says multi-fidelity BO "is planned"; the paper only
+    calls it "a natural direction for future work". Judgment fix by
+    `/brain-edit` or by hand.
+  - Orphan: `source/src-20261105-zoo-rostock-polar-bear-tracks` (a
+    tracking-dataset figure) is linked from no page. Its `resource` is a
+    filename (`r11.png`), not a URL.
+  - Missing person pages for the other mlr3mbo authors (named, not
+    linked).

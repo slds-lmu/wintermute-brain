@@ -388,10 +388,53 @@ def report_health(title: str, body: str) -> None:
     sh(["gh", "issue", "comment", str(number), "--repo", REPO, "--body", f"**{title}**\n\n- when: {when}\n- agent: {AGENT}\n\n{body}"])
 
 
+def pieces(records: list[dict], start: int, end: int, turns: int = TURNS) -> list[tuple[int, int]]:
+    """Split messages start..end into pieces of about `turns` human turns,
+    as the live hook would have digested them. A long backlog (catch-up at
+    session start, or a first digest of a long session) is otherwise cut to
+    its head and tail and loses the middle (live test 2026-11-05)."""
+    bounds = [start]
+    count = 0
+    for i in range(start, min(end, len(records)) + 1):
+        if is_human_turn(records[i - 1]):
+            count += 1
+            if count > turns:
+                bounds.append(i)
+                count = 1
+    out = []
+    for a, b in zip(bounds, bounds[1:] + [end + 1]):
+        if a <= b - 1:
+            out.append((a, b - 1))
+    return out
+
+
 def digest(transcript: Path, session_id: str, cwd: str, start: int, end: int) -> int:
-    def finish(digested_until: int | None):
+    """Digest messages start..end, in pieces of about TURNS human turns,
+    oldest first; stops at the first failed piece (the checkpoint keeps the
+    rest for the next run)."""
+    try:
+        records = read_transcript(transcript)
+    except Exception as exc:  # noqa: BLE001
+        log(f"digest failed for {session_id}: {exc}")
+        return 1
+    rc = 0
+    try:
+        for a, b in pieces(records, start, min(end, len(records))):
+            rc = digest_piece(transcript, session_id, cwd, a, b)
+            if rc != 0:
+                break
+    finally:
+        # Only now may the next hook spawn a digest for this session;
+        # clearing "pending" per piece would let two runs overlap.
         data = load_cache(session_id)
         data.pop("pending", None)
+        save_cache(session_id, data)
+    return rc
+
+
+def digest_piece(transcript: Path, session_id: str, cwd: str, start: int, end: int) -> int:
+    def finish(digested_until: int | None):
+        data = load_cache(session_id)
         if digested_until is not None:
             data["digested_until"] = digested_until
             data["last_digest_at"] = time.time()

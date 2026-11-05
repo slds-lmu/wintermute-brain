@@ -80,7 +80,8 @@ Every operation that writes follows the same path (C1, A2):
    invoking human. "Reject" needs a clear signal: a failed
    precondition, a failed required check, or a closed PR.
 5. **Outcome unknown** (decided 2026-11-05 after the first live test):
-   `commit-op` waits up to **10 minutes** for the merge. If the PR is
+   `commit-op` waits up to **20 minutes** for the merge (raised from 10
+   after the live test, where GitHub's auto-merge took up to ~9 minutes). If the PR is
    neither merged nor clearly rejected by then, or GitHub can't be
    asked, the PR **stays open** and the agent **must not redo** the
    operation (a redo after a merge would create a duplicate). It tells

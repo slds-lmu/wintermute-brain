@@ -285,6 +285,15 @@ class EvidenceTest(Temp):
         r = tool("check_evidence", "--root", self.root)
         self.assertIn("has no raw item", r.stdout)
 
+    def test_numbers_inside_urls_are_ignored(self):
+        # live test 2026-11-05: an ORCID URL was read as two dates
+        self.edit("wiki/page/llm-wiki.md", "## Related",
+                  "ORCID: https://orcid.org/0000-0002-8115-0400 and <https://doi.org/10.1234/5678.90>\n\n## Related")
+        r = tool("check_evidence", "--root", self.root)
+        self.assertNotIn("0000-00", r.stdout)
+        self.assertNotIn("8115", r.stdout)
+        self.assertNotIn("5678", r.stdout)
+
     def test_author_not_in_raw_is_suspect(self):
         # live test 2026-11-05: an author name filled in from memory
         self.edit("raw/web/2026/src-20261029-denser-llm-wiki-survey/source.yaml",
@@ -498,6 +507,29 @@ class WaitForMergeTest(unittest.TestCase):
         self.assertEqual(r[0], "unknown")
         r = self.run_wait({"view": (0, '{"state":"OPEN","headRefOid":"abc"}'), "runs": (0, runs)})
         self.assertEqual(r[0], "unknown")
+
+
+
+# --- session digests: long backlogs are split (live test 2026-11-05) ------------
+
+class DigestPiecesTest(unittest.TestCase):
+    def test_backlog_split_into_turn_pieces(self):
+        import importlib.util
+        path = TOOLS.parent / "plugin" / "scripts" / "brain_session.py"
+        spec = importlib.util.spec_from_file_location("brain_session", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        human = {"type": "user", "message": {"content": "q"}}
+        bot = {"type": "assistant", "message": {"content": [{"type": "text", "text": "a"}]}}
+        records = [human, bot] * 45          # 45 human turns, 90 messages
+        ps = mod.pieces(records, 1, 90, turns=20)
+        self.assertEqual(ps, [(1, 40), (41, 80), (81, 90)])
+        # contiguous, complete, each piece at most 20 human turns
+        self.assertEqual(ps[0][0], 1)
+        self.assertEqual(ps[-1][1], 90)
+        for (a, b), (c, _) in zip(ps, ps[1:]):
+            self.assertEqual(b + 1, c)
+        self.assertEqual(mod.pieces(records, 1, 10, turns=20), [(1, 10)])
 
 
 if __name__ == "__main__":

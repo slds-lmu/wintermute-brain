@@ -58,6 +58,7 @@ SUFFIX_RE = re.compile(r"[KMB%]$")
 DATE_RE = re.compile(r"\d{4}-\d{2}(?:-\d{2})?")
 QUOTE_RES = [re.compile(r'"([^"\n]*)"'), re.compile(r"“([^”\n]*)”")]
 LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+URL_RE = re.compile(r"<?\bhttps?://[^\s<>)\]]+>?")
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 FENCE_CLOSE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
@@ -92,9 +93,12 @@ def normalize(text: str) -> str:
 def strip_noise(text: str) -> str:
     """Inline code is not a claim. Link labels of internal links (citations
     such as "[Karpathy 2026](/wiki/paper/…)") are labels, not claims, so
-    they are dropped; external link labels stay."""
+    they are dropped; external link labels stay. Bare URLs are dropped."""
     text = INLINE_CODE_RE.sub(" ", text)
-    return LINK_RE.sub(lambda m: " " if m.group(2).startswith("/") else m.group(1), text)
+    text = LINK_RE.sub(lambda m: " " if m.group(2).startswith("/") else m.group(1), text)
+    # Bare URLs and <autolinks> are addresses, not claims: an ORCID or DOI
+    # in a URL must not be read as dates or numbers (live test 2026-11-05).
+    return URL_RE.sub(" ", text)
 
 
 def keep_number(token: str) -> bool:
