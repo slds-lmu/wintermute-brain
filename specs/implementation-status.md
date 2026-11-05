@@ -66,7 +66,7 @@ scratch folder (Marc adds them to the slds docker image).
 
 | Test | Result |
 |---|---|
-| Unit tests, lint on the repo | pass, clean |
+| Unit tests, lint on the repo | pass, clean (47 tests after the fixes below) |
 | Ingest 1 (web, new): Karpathy's LLM-wiki gist | PR #2, check passed, auto-merged in ~2 min; author `brain-agent-interactive` |
 | Ingest 2 (web, update): rohitg00's LLM Wiki v2 gist | PR #4; existing page updated, no duplicate; `commit-op` reported "merged" correctly |
 | Index Action via the App | pushed `index: regenerate` after PRs #3 and #4 |
@@ -87,17 +87,15 @@ Problems found and how they were handled:
    a per-command HTTPS override and `slds-write`.
 5. Ingest 2: the agent filled `authors` in `source.yaml` from its own
    knowledge (a full name the source does not contain); caught by hand.
-   No tool checks `source.yaml` metadata against the raw files. **Open**
-   (§ 5).
+   **Fixed (owner chose rule + check):** 01 § 4 rule "metadata only from
+   the source", skill rule, and `tools/check_evidence` now reports
+   `title`/`authors` not found in the raw files (registry metadata and
+   session digests excepted; 3 new tests, 46 pass). The check flags
+   ingest 1 too: "Andrej Karpathy" isn't in the fetched gist either.
+   That raw item is immutable, so the suspect stays as a known case.
 
 ## 5. Open
 
-- **`source.yaml` metadata is unchecked** (live test, problem 5).
-  Options: a skill rule ("metadata only from the source; else leave it
-  empty") and/or a `check_evidence` check that `authors` and `title`
-  appear in the raw files.
-- **Parked items K1 (reason per edit) and K3 (plan before writing):**
-  cheap prompt rules; decide whether they go into v1.
 - **Empirical checks:**
   - 10-paper PDF converter benchmark (MinerU vs. Marker; I12). Paper
     ingest relies on litdownload (arXiv TeX/HTML) until then.
@@ -111,3 +109,9 @@ Problems found and how they were handled:
 - **Not yet tested live:** paper ingest, session digests end to end, the
   server worker, `/brain-lint`, `/brain-edit`.
 - Who administers the server worker and the API key (06 § 8).
+
+## 6. Changes after the live tests (2026-11-05)
+
+- **Reasons and plan in every commit** (owner): `commit-op --plan` and
+  `--reason`; a change without a reason per changed wiki page is refused
+  (ingest, compile, edit). 03 § 3, § 6; skill; compile prompt; tests.

@@ -285,6 +285,25 @@ class EvidenceTest(Temp):
         r = tool("check_evidence", "--root", self.root)
         self.assertIn("has no raw item", r.stdout)
 
+    def test_author_not_in_raw_is_suspect(self):
+        # live test 2026-11-05: an author name filled in from memory
+        self.edit("raw/web/2026/src-20261029-denser-llm-wiki-survey/source.yaml",
+                  "retrieved:", "authors: [Jane Invented]\nretrieved:")
+        r = tool("check_evidence", "--root", self.root)
+        self.assertIn("author 'Jane Invented' not found in the raw files", r.stdout)
+
+    def test_title_not_in_raw_is_suspect(self):
+        self.edit("raw/web/2026/src-20261029-denser-llm-wiki-survey/source.yaml",
+                  'title: "LLM wiki survey"', 'title: "A Guessed Title"')
+        r = tool("check_evidence", "--root", self.root)
+        self.assertIn("title 'A Guessed Title' not found", r.stdout)
+
+    def test_registry_metadata_is_not_checked(self):
+        self.edit("raw/web/2026/src-20261029-denser-llm-wiki-survey/source.yaml",
+                  "retrieved:", "doi: 10.1234/x\nauthors: [Jane Registry]\nretrieved:")
+        r = tool("check_evidence", "--root", self.root)
+        self.assertNotIn("Jane Registry", r.stdout)
+
     def test_queue_lists_raw_without_summary(self):
         self.write("raw/web/2026/src-20260101-todo/page.md", "x\n")
         self.write("raw/web/2026/src-20260101-todo/source.yaml", "id: src-20260101-todo\nchannel: web\n")
@@ -323,7 +342,9 @@ class CommitOpTest(Temp):
         self.assertTrue((wt / "wiki").is_dir())
         (wt / "wiki/page/new-topic.md").write_text(
             "---\ntype: page\ntitle: New topic\ndescription: d\n---\nSee [LLM wiki](wiki/page/llm-wiki.md).\n")
-        r = self.commit(wt, "-m", "ingest(web): src-20260101-new", "--disposition", "New", "--source", "https://x", "--cleanup")
+        r = self.commit(wt, "-m", "ingest(web): src-20260101-new", "--disposition", "New", "--source", "https://x",
+                        "--plan", "page/new-topic: create", "--reason", "page/new-topic: new topic from the source",
+                        "--cleanup")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         page = self.origin_main("wiki/page/new-topic.md")
         self.assertIn("(/wiki/page/llm-wiki.md)", page)  # safe fix applied
@@ -332,6 +353,8 @@ class CommitOpTest(Temp):
         self.assertIn("Pages: +page/new-topic", log)
         self.assertIn("Invoked-by: jane-doe", log)
         self.assertIn("Disposition: New", log)
+        self.assertIn("Planned:\n- page/new-topic: create", log)
+        self.assertIn("Reasons:\n- page/new-topic: new topic from the source", log)
         # index files are not part of the commit
         changed = git(["diff", "--name-only", "main~1", "main"], self.origin).stdout.split()
         self.assertEqual(changed, ["wiki/page/new-topic.md"])
@@ -340,7 +363,7 @@ class CommitOpTest(Temp):
     def test_lint_error_blocks(self):
         wt = self.start()
         (wt / "wiki/page/bad.md").write_text("---\ntype: nope\ntitle: x\ndescription: d\n---\n")
-        r = self.commit(wt, "-m", "edit: bad page")
+        r = self.commit(wt, "-m", "edit: bad page", "--reason", "page/bad: test")
         self.assertEqual(r.returncode, 1)
         self.assertIn("frontmatter", r.stdout)
 
@@ -353,7 +376,7 @@ class CommitOpTest(Temp):
         q.write_text(q.read_text().replace("## Scaling", "## Scaling (human)"))
         git(["commit", "--quiet", "-am", "edit: human change"], self.root)
         git(["push", "--quiet", "origin", "main"], self.root)
-        r = self.commit(wt, "-m", "edit: agent change")
+        r = self.commit(wt, "-m", "edit: agent change", "--reason", "page/llm-wiki: test")
         self.assertEqual(r.returncode, 1)
         self.assertIn("changed upstream", r.stdout)
 
@@ -364,7 +387,7 @@ class CommitOpTest(Temp):
         git(["add", "-A"], self.root)
         git(["commit", "--quiet", "-m", "edit: human dup"], self.root)
         git(["push", "--quiet", "origin", "main"], self.root)
-        r = self.commit(wt, "-m", "edit: agent dup")
+        r = self.commit(wt, "-m", "edit: agent dup", "--reason", "page/dup: test")
         self.assertEqual(r.returncode, 1)
         self.assertIn("already exists upstream", r.stdout)
 
@@ -376,9 +399,18 @@ class CommitOpTest(Temp):
         wt = self.start()
         p = wt / "wiki/page/llm-wiki.md"
         p.write_text(p.read_text().replace("## Related", "## Related\n\nAgent addition."))
-        r = self.commit(wt, "-m", "edit: on locked")
+        r = self.commit(wt, "-m", "edit: on locked", "--reason", "page/llm-wiki: test")
         self.assertEqual(r.returncode, 1)
         self.assertIn("locked", r.stdout)
+
+    def test_missing_reason_is_usage_error(self):
+        wt = self.start()
+        p = wt / "wiki/page/llm-wiki.md"
+        p.write_text(p.read_text().replace("## Related", "## Related\n\nAgent addition."))
+        r = self.commit(wt, "-m", "edit: no reason given")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("needs a reason", r.stdout + r.stderr)
+        self.assertIn("page/llm-wiki", r.stdout + r.stderr)
 
     def test_bad_subject_is_usage_error(self):
         wt = self.start()

@@ -13,7 +13,12 @@ source page is implicitly cited by its own raw item.
 Report-only; never modifies files. Three sweeps:
 1. Fidelity: candidate literals per paragraph (quotes ≥ 15 chars, ISO
    dates, specific numbers) that no cited raw file contains, and
-   paragraphs with literals but no citation at all.
+   paragraphs with literals but no citation at all. For a summary page,
+   also its raw item's metadata: `title` and every `authors` entry in
+   `source.yaml` must appear in the raw files (case-insensitive), unless
+   the metadata comes from a registry (`doi` or `arxiv` set) or the
+   channel is `session` (the digest agent writes it). Added 2026-11-05
+   after the live test (implementation-status § 4, problem 5).
 2. Evidence errors: citations whose id has no raw folder, or raw
    folders without any text file.
 3. Backlog: raw items without a summary page (= the compile queue).
@@ -38,8 +43,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from brainlib import (  # noqa: E402
-    RAW_TEXT_SUFFIXES, Page, extract_links, iter_pages, load_page, raw_dir_for_id,
-    raw_item_dirs, repo_root, summary_page_for_raw,
+    RAW_TEXT_SUFFIXES, Page, extract_links, iter_pages, load_page, load_source_yaml,
+    raw_dir_for_id, raw_item_dirs, repo_root, summary_page_for_raw,
 )
 
 NUMBER_TOKEN_RE = re.compile(
@@ -200,6 +205,25 @@ class RawCache:
         return self.cache[source_id]
 
 
+def metadata_suspects(root: Path, source_id: str, raw_text: str) -> list[str]:
+    """`title` and `authors` of source.yaml that the raw files don't contain.
+    Skipped for registry metadata (doi/arxiv) and session digests."""
+    d = raw_dir_for_id(root, source_id)
+    meta = load_source_yaml(d) if d else None
+    if not meta or meta.get("doi") or meta.get("arxiv") or meta.get("channel") == "session":
+        return []
+    hay = raw_text.lower()
+    out = []
+    title = meta.get("title")
+    if isinstance(title, str) and title.strip() and normalize(title).lower() not in hay:
+        out.append(f"source.yaml: title {title!r} not found in the raw files")
+    authors = meta.get("authors") or []
+    for a in authors if isinstance(authors, list) else [authors]:
+        if isinstance(a, str) and a.strip() and normalize(a).lower() not in hay:
+            out.append(f"source.yaml: author {a!r} not found in the raw files (metadata only from the source)")
+    return out
+
+
 def check_page(page: Page, raws: RawCache) -> tuple[list[str], list[str]]:
     """Return (fidelity suspects, evidence errors) for one page."""
     suspects: list[str] = []
@@ -207,6 +231,8 @@ def check_page(page: Page, raws: RawCache) -> tuple[list[str], list[str]]:
     own_id = page.slug if page.type_dir in ("paper", "source") else None
     if own_id and raws.text(own_id) is None:
         errors.append(f"summary page has no raw item: raw/*/*/{own_id}/")
+    elif own_id and raws.text(own_id):
+        suspects.extend(metadata_suspects(raws.root, own_id, raws.text(own_id)))
     fm_lines = page.text[: len(page.text) - len(page.body)].count("\n")
     for unit in split_units(page.body, fm_lines + 1):
         cands = unit_candidates(unit)

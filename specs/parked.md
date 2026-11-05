@@ -76,9 +76,9 @@ Look at these first when v1 runs.
 
 | # | Idea | Origin | Affects |
 |---|---|---|---|
-| K1 | **Reason per edit.** Every write carries a short reason that becomes the commit message | H (Wiki.js 3) | 03 |
+| K1 | **MOVED INTO v1 (owner, 2026-11-05; 03 § 3, § 6).** **Reason per edit.** Every write carries a short reason that becomes the commit message | H (Wiki.js 3) | 03 |
 | K2 | **Refuse duplicate creates.** Creating a page fails if a page with that title or slug already exists (partly covered by A2) | H (Wiki.js 3) | 03 |
-| K3 | **Plan before writing.** Ingest first lists the pages it will create or update, then writes them | F (arkon) | 03 ingest |
+| K3 | **MOVED INTO v1 (owner, 2026-11-05; 03 § 3, § 6).** **Plan before writing.** Ingest first lists the pages it will create or update, then writes them | F (arkon) | 03 ingest |
 | K4 | **Chunked analysis of long sources.** Extract claims chunk by chunk with source offsets, then write pages | F (arkon), G (nashsu) | 03 ingest |
 | K5 | **Copy structured data verbatim** (tables, schemas, configs) | G (nashsu) | 03 ingest |
 | K6 | **Page-worthiness rule.** Only important subjects get their own page; reuse existing page names instead of inventing new ones | G (nashsu) | 03 ingest |

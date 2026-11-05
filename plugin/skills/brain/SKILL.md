@@ -140,6 +140,11 @@ ingested_by: bernd-bischl           # person slug of the human who asked
 files: [page.md]
 ```
 
+**Metadata only from the source.** `title` and `authors` must appear in
+the fetched files, or come from a registry lookup (then set `doi` or
+`arxiv`). If the source doesn't name an author, leave `authors: []`. Never
+fill metadata from your own knowledge; `tools/check_evidence` flags it.
+
 Slugs (lowercase kebab-case, unique across the repo): paper
 `firstauthor-year-keyword`; other sources `src-YYYYMMDD-keyword`. A changed
 upstream source becomes a *new* raw item with its own id.
@@ -158,6 +163,10 @@ and claims, then state one disposition in the commit:
 
 New, Update and Disputed may combine; No material is exclusive. Do not force
 pages out of a thin source.
+
+**Plan before writing.** After triage and before writing any page, list the
+pages you will create or update, one line each (`type/slug: what`). Pass each
+line to `commit-op` as `--plan`.
 
 ### 5. Summary page
 
@@ -193,7 +202,11 @@ disagreement between sources keeps both claims under the claim:
 
 `tools/check_evidence <changed pages>`: fix every real suspect (missing or
 misquoted literal, literal in a paragraph without a citation). Then
-`tools/commit-op … -m "ingest(<channel>): <id>" --disposition … --source <url>`.
+`tools/commit-op … -m "ingest(<channel>): <id>" --disposition … --source <url>
+--plan "…" … --reason "type/slug: why" …`. **Every changed wiki page needs one
+`--reason`** saying why it changed (e.g. `page/automl-benchmark: deadline moved
+to 15 March per the 4 Nov meeting notes`); `commit-op` refuses the commit
+otherwise. The same holds for `compile:` and `edit:`.
 
 ## Query (`/brain-ask <question>`, or any question about the group) — writes nothing
 
@@ -240,6 +253,12 @@ ingest(paper): karpathy-2026-llm-wiki
 Disposition: New
 Source: https://…
 Pages: +paper/karpathy-2026-llm-wiki, ~page/llm-wiki
+Planned:
+- paper/karpathy-2026-llm-wiki: create summary
+- page/llm-wiki: add the three-layer structure
+Reasons:
+- paper/karpathy-2026-llm-wiki: new source
+- page/llm-wiki: the source defines the pattern's layers and operations
 Invoked-by: bernd-bischl
 Agent: brain-agent-interactive
 Overrides-human: /wiki/paper/karpathy-2026-llm-wiki.md   # only when needed

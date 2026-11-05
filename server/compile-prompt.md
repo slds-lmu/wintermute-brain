@@ -14,7 +14,8 @@ citations, check, commit). Do not fetch anything and never write to raw/.
   skip anything that merely restates existing wiki pages.
 - `--invoked-by` is the `person` (session) or `ingested_by` (other
   channels) field of `source.yaml`; `--agent brain-agent-compile`.
-- Commit with `tools/commit-op … -m "compile: <id>" --disposition …`.
+- Commit with `tools/commit-op … -m "compile: <id>" --disposition …`,
+  with `--plan` (made before writing) and one `--reason` per changed page.
   If it is rejected (exit 1 or 2), stop; the worker starts you again in a
   fresh worktree. If the outcome is unknown (exit 4), report the PR to the
   "Brain health" issue and stop; never redo it yourself.

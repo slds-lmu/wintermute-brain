@@ -28,6 +28,8 @@ Usage
   tools/commit-op --agent NAME --invoked-by PERSON -m "ingest(web): slug"
       [--disposition New|Update|Disputed|No material] [--source URL]
       [--note TEXT] [--overrides /wiki/paper/x.md ...]
+      [--plan "type/slug: what will change" ...]
+      [--reason "type/slug: why it changed" ...]
       [--upstream origin/main] [--no-pr] [--wait SECONDS] [--cleanup]
   tools/commit-op --check --base REV --head REV [--upstream origin/main]
       preconditions only (used by the GitHub check)
@@ -109,6 +111,24 @@ def pages_trailer(changes: list[tuple[str, str]]) -> str:
     return ", ".join(items)
 
 
+REASON_OPS = ("ingest(", "compile:", "edit:")
+
+
+def missing_reasons(args: argparse.Namespace, changes: list[tuple[str, str]]) -> list[str]:
+    """Changed wiki pages without a --reason, for ingest, compile and edit
+    (lint safe fixes and schema changes don't need one)."""
+    if not (args.message or "").startswith(REASON_OPS):
+        return []
+    given = {r.split(":", 1)[0].strip() for r in args.reason or [] if ":" in r}
+    out = []
+    for _, rel in changes:
+        if rel.startswith("wiki/") and rel.endswith(".md"):
+            key = rel[len("wiki/"):-3]
+            if key not in given:
+                out.append(key)
+    return out
+
+
 def build_message(args: argparse.Namespace, changes: list[tuple[str, str]]) -> str:
     lines = [args.message, ""]
     if args.disposition:
@@ -116,6 +136,12 @@ def build_message(args: argparse.Namespace, changes: list[tuple[str, str]]) -> s
     if args.source:
         lines.append(f"Source: {args.source}")
     lines.append(f"Pages: {pages_trailer(changes) or '(none)'}")
+    if args.plan:
+        lines.append("Planned:")
+        lines.extend(f"- {p}" for p in args.plan)
+    if args.reason:
+        lines.append("Reasons:")
+        lines.extend(f"- {r}" for r in args.reason)
     lines.append(f"Invoked-by: {args.invoked_by}")
     lines.append(f"Agent: {args.agent}")
     for o in args.overrides or []:
@@ -216,6 +242,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--source")
     ap.add_argument("--note")
     ap.add_argument("--overrides", action="append", default=[], help="Overrides-human: source page (/wiki/…)")
+    ap.add_argument("--plan", action="append", default=[],
+                    help="planned change, written before the pages (03 § 3): 'type/slug: what'")
+    ap.add_argument("--reason", action="append", default=[],
+                    help="why a page changed, one per changed page: 'type/slug: why'")
     ap.add_argument("--upstream", default="origin/main")
     ap.add_argument("--no-pr", action="store_true", help="push straight to main (fast-forward) instead of a PR")
     ap.add_argument("--wait", type=int, default=600, help="seconds to wait for the PR to merge (0 = don't wait)")
@@ -276,6 +306,11 @@ def main(argv: list[str]) -> int:
     changes = [c for c in worktree_changes(base, root) if not is_index(c[1])]
     if not changes:
         log("nothing to commit")
+        return 3
+    missing = missing_reasons(args, changes)
+    if missing:
+        log("every changed wiki page needs a reason (03 § 6): --reason 'type/slug: why'. Missing: "
+            + ", ".join(missing))
         return 3
 
     # -- 3. preconditions --

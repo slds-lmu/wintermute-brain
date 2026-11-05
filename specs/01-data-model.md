@@ -119,6 +119,11 @@ Rules:
 - Nothing in `raw/` changes after ingest. A newer version of a source
   becomes a new source with its own id.
 - Secrets are stripped **before** writing to `raw/` (R15).
+- **Metadata only from the source** (2026-11-05). `title` and
+  `authors` must appear in the raw files, or come from a registry
+  (`doi` / `arxiv` set). If the source doesn't name an author, leave
+  `authors` empty; never fill it from the agent's own knowledge.
+  `tools/check_evidence` reports violations (session digests excepted).
 - Every raw item has exactly one summary page in `wiki/`: a `paper`
   page for papers, a `source` page for everything else. Citations
   point to that summary page (§ 6).

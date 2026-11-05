@@ -139,7 +139,9 @@ phase, humans decide what gets ingested (00 § 7).
 2. **Secret scan:** `gitleaks` on the fetched text before anything is
    written (R5, R15). Findings are redacted.
 3. **Write raw:** `raw/<channel>/<YYYY>/<id>/` with the original files
-   and `source.yaml` (01 § 4). Raw files are never changed afterwards.
+   and `source.yaml` (01 § 4). Metadata only from the source or a
+   registry, never from the agent's own knowledge (01 § 4). Raw files
+   are never changed afterwards.
    A changed upstream source becomes a new raw item (I8).
 4. **Triage** (I2). Search the wiki for the source's entities, aliases
    and claims, then state one disposition:
@@ -148,6 +150,10 @@ phase, humans decide what gets ingested (00 § 7).
    - **Disputed:** it contradicts an existing claim on content;
    - **No material:** it adds nothing. Write only the raw item and its
      summary page, nothing else (I3), and say so in the commit.
+
+   **Plan before writing** (owner, 2026-11-05): after triage, list the
+   pages to create or update, one line each (`type/slug: what`), before
+   writing any of them. The plan goes into the commit (`--plan`).
 5. **Write the summary page:** one `paper` page (papers) or `source`
    page (everything else) per raw item, with the type's template.
 6. **Cascade updates** (I4): search the *whole* wiki (qmd + grep, not
@@ -258,6 +264,12 @@ ingest(paper): karpathy-2026-llm-wiki
 Disposition: New
 Source: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 Pages: +paper/karpathy-2026-llm-wiki, ~page/llm-wiki
+Planned:
+- paper/karpathy-2026-llm-wiki: create summary
+- page/llm-wiki: add the three-layer structure
+Reasons:
+- paper/karpathy-2026-llm-wiki: new source
+- page/llm-wiki: the source defines the pattern's layers and operations
 Invoked-by: bernd-bischl
 Agent: claude-code
 Overrides-human: /wiki/paper/karpathy-2026-llm-wiki.md   # only when needed
@@ -267,6 +279,13 @@ Note: source contained instructions addressed to the agent; ignored   # only whe
 - Operation types: `ingest(<channel>)` (raw + wiki for web/paper;
   raw only for `ingest(session)`), `compile` (worker, wiki only),
   `lint` (safe fixes), `edit`, `index`, `schema`.
+- **Reasons** (owner, 2026-11-05): for `ingest`, `compile` and `edit`,
+  every changed wiki page gets one line saying *why* it changed
+  (`--reason 'type/slug: why'`). `commit-op` refuses the commit if a
+  changed page has no reason. The page stays clean; the reason is in
+  the history (GitHub "History" and "Blame", `git log -- <page>`).
+- **Planned** lists the plan made before writing (§ 3 step 4); comparing
+  it with `Pages` shows what was intended and what was done.
 - `Invoked-by` names the human (R18).
 - `Overrides-human` names the newer source page that justifies
   changing a human-written line. `commit-op` checks that this source

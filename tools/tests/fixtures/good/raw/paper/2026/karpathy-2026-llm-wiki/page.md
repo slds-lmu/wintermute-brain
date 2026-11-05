@@ -1,5 +1,7 @@
 # LLM Wiki
 
+By Andrej Karpathy.
+
 The LLM writes and maintains the wiki; the human reads and asks questions.
 Three layers: raw sources, the wiki, and the schema. The wiki is "a persistent,
 compounding artifact" that grows with every ingest. A typical knowledge base
