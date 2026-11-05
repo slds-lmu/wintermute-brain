@@ -94,12 +94,10 @@ class RepoAccess:
         stale = bool(hit and hit[1] and hit[0] + self.stale_grace > now)
         task = self.pending.get(digest)
         if task is None:
-            try:
+            # A known token is always rechecked, so that throttling cannot
+            # keep a revoked one alive through the stale grace period.
+            if not stale:
                 self._admit_check(client_address, now)
-            except (ChecksThrottled, GitHubUnavailable):
-                if stale:
-                    return True
-                raise
             task = asyncio.create_task(self._check(digest, token))
             self.pending[digest] = task
             task.add_done_callback(lambda _: self.pending.pop(digest, None))

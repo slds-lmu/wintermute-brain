@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import fakeredis.aioredis
+import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -35,6 +36,9 @@ class Process:
 
 class Runtime(QmdRuntime):
     def configure(self):
+        pass
+
+    async def check_gpu(self):
         pass
 
     async def refresh(self):
@@ -253,31 +257,126 @@ def test_handoff_stops_qmd_when_a_search_outlasts_the_drain(runtime_environment,
     asyncio.run(exercise())
 
 
-def test_refresh_is_skipped_while_a_search_outlasts_the_drain(runtime_environment, monkeypatch):
+def test_refresh_leaves_searches_running(runtime_environment):
     async def exercise():
-        monkeypatch.setenv("BRAIN_GPU_DRAIN", "0.01")
         runtime = QmdRuntime(Demand())
         runtime.ready.set()
-        commands = []
+        states = []
 
         async def command(*args, **kwargs):
-            commands.append(args)
-            return ""
+            states.append(runtime.ready.is_set())
+            return "revision"
 
         runtime.command = command
-        release = asyncio.Event()
+        runtime.active = 1
+        runtime.idle.clear()
+        await asyncio.wait_for(runtime.refresh(), 1)
+        assert states and all(states)
+        assert runtime.state != "indexing"
+        await runtime.client.aclose()
 
-        async def search():
-            async with runtime.admission():
-                await release.wait()
+    asyncio.run(exercise())
 
-        active = asyncio.create_task(search())
-        await asyncio.sleep(0)
-        await runtime.refresh()
-        assert not commands
-        assert runtime.last_refresh > 0
-        release.set()
-        await active
+
+def test_gpu_failure_is_an_error_and_not_a_silent_cpu_fallback(runtime_environment, monkeypatch):
+    async def exercise():
+        runtime = Runtime(Demand())
+        spawned = []
+
+        async def spawn(*args, **kwargs):
+            spawned.append(args)
+            return Process()
+
+        async def broken():
+            raise RuntimeError("no CUDA device")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+        runtime.check_gpu = broken
+        with pytest.raises(RuntimeError):
+            await runtime.step()
+        assert not spawned
+        assert not runtime.ready.is_set()
+        await runtime.pause("error")
+        await runtime.client.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_recurring_failure_stays_visible_until_qmd_is_ready_again(runtime_environment, monkeypatch):
+    async def exercise():
+        monkeypatch.setenv("BRAIN_GPU_POLL", "0")
+        runtime = Runtime(Demand())
+        real_sleep = asyncio.sleep
+
+        async def no_wait(seconds):
+            await real_sleep(0)
+
+        async def fail():
+            runtime.stopping = True
+            raise RuntimeError("warmup failed")
+
+        real_step = runtime.step
+        runtime.step = fail
+        monkeypatch.setattr(asyncio, "sleep", no_wait)
+        await runtime.run()
+        assert runtime.status()["failing"]
+        runtime.step = real_step
+        runtime.stopping = False
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _no_process)
+        monkeypatch.setattr(os, "killpg", lambda pid, sig: None)
+        runtime.client = httpx.AsyncClient()
+        await runtime.step()
+        assert runtime.ready.is_set()
+        assert not runtime.status()["failing"]
+        await runtime.client.aclose()
+
+    asyncio.run(exercise())
+
+
+async def _no_process(*args, **kwargs):
+    return Process()
+
+
+def test_cpu_qmd_watch_gives_up_on_a_process_that_stopped_answering(runtime_environment, monkeypatch):
+    async def exercise():
+        monkeypatch.setenv("BRAIN_CPU_HEALTH_INTERVAL", "0.001")
+        runtime = QmdRuntime(Demand())
+        cpu = CpuQmd(runtime)
+        calls = []
+
+        class Hanging(Process):
+            async def wait(self):
+                await asyncio.Event().wait()
+
+        def health(request):
+            calls.append(request.url.path)
+            return httpx.Response(500)
+
+        await cpu.client.aclose()
+        cpu.client = httpx.AsyncClient(transport=httpx.MockTransport(health))
+        cpu.process = Hanging()
+        await asyncio.wait_for(cpu._watch(), 2)
+        assert calls == ["/health"] * 3
+        await cpu.client.aclose()
+        await runtime.client.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_cpu_qmd_reports_how_long_it_has_been_down(runtime_environment, monkeypatch):
+    async def exercise():
+        runtime = QmdRuntime(Demand())
+        cpu = CpuQmd(runtime)
+        cpu.available.set()
+        assert cpu.down_for() == 0
+        monkeypatch.setattr(os, "killpg", lambda pid, sig: None)
+        cpu.process = Process()
+        cpu.abort()
+        down_since = cpu.down_since
+        assert 0 <= cpu.down_for() < 5
+        cpu.abort()
+        assert cpu.down_since == down_since
+        await cpu.client.aclose()
         await runtime.client.aclose()
 
     asyncio.run(exercise())
@@ -326,6 +425,7 @@ record = {
     "devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
     "parallelism": os.environ.get("QMD_EMBED_PARALLELISM"),
     "expand_threads": os.environ.get("QMD_EXPAND_THREADS"),
+    "service_token": os.environ.get("BRAIN_SEARCH_SERVICE_TOKEN"),
     "niceness": os.nice(0),
     "files": [os.readlink("/proc/self/fd/" + fd) for fd in os.listdir("/proc/self/fd")
               if os.path.exists("/proc/self/fd/" + fd)],
@@ -358,7 +458,7 @@ def alive(pid: int) -> bool:
 def test_cpu_qmd_is_killed_restarted_and_never_holds_the_gpu_lock(
     runtime_environment, tmp_path, monkeypatch,
 ):
-    binary = tmp_path / "bin" / "qmd"
+    binary = tmp_path / "bin" / "node"
     binary.parent.mkdir()
     binary.write_text(FAKE_QMD)
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
@@ -368,6 +468,8 @@ def test_cpu_qmd_is_killed_restarted_and_never_holds_the_gpu_lock(
         port = probe.getsockname()[1]
     monkeypatch.setenv("PATH", str(binary.parent) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("FAKE_QMD_LOG", str(records))
+    monkeypatch.setenv("BRAIN_QMD_ENTRY", "/fake/qmd.js")
+    monkeypatch.setenv("BRAIN_SEARCH_SERVICE_TOKEN", "internal-service-token")
     monkeypatch.setenv("BRAIN_CPU_PORT", str(port))
 
     def started():
@@ -385,7 +487,8 @@ def test_cpu_qmd_is_killed_restarted_and_never_holds_the_gpu_lock(
             assert first["parallelism"] == cpu.parallelism
             assert first["expand_threads"] == cpu.expand_threads
             assert first["niceness"] == int(cpu.nice) + os.nice(0)
-            assert first["args"][:2] == ["mcp", "--http"]
+            assert first["args"][:3] == ["/fake/qmd.js", "mcp", "--http"]
+            assert first["service_token"] is None
             assert first["pgid"] == first["pid"]
             assert not [path for path in first["files"] if "gpu.lock" in path]
             cpu.abort()

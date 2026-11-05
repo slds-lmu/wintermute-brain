@@ -29,6 +29,7 @@ MEMBER = {"Authorization": "Bearer member-token"}
 class Gpu:
     upstream = "http://gpu"
     state = "paused"
+    failing = False
 
     def __init__(self, ready=False):
         self.ready = asyncio.Event()
@@ -41,7 +42,7 @@ class Gpu:
         await asyncio.Event().wait()
 
     def status(self):
-        return {"state": self.state, "ready": self.ready.is_set(), "revision": "secret-revision"}
+        return {"state": self.state, "ready": self.ready.is_set(), "failing": self.failing, "revision": "secret"}
 
     @asynccontextmanager
     async def admission(self):
@@ -63,12 +64,16 @@ class Cpu:
             self.available.set()
         self.search_slot = asyncio.Semaphore(1)
         self.aborts = 0
+        self.down = 0
 
     async def run(self):
         await asyncio.Event().wait()
 
     def abort(self):
         self.aborts += 1
+
+    def down_for(self):
+        return self.down
 
 
 class Upstreams:
@@ -106,7 +111,6 @@ async def routed(ready=False, available=True, **settings):
     gpu, cpu = Gpu(ready), Cpu(available)
     async with httpx.AsyncClient(transport=httpx.MockTransport(upstreams)) as client:
         router = Router(gpu, cpu, client)
-        router.cpu_grace = 0
         router.tick = 0.01
         for name, value in settings.items():
             setattr(router, name, value)
@@ -119,7 +123,7 @@ def run(coroutine):
 
 def test_search_uses_only_the_gpu_while_it_is_available():
     async def exercise():
-        async with routed(ready=True, cpu_grace=0.05) as (router, gpu, cpu, upstreams):
+        async with routed(ready=True) as (router, gpu, cpu, upstreams):
             response = await router.search(call(), never_disconnected)
             assert response.status_code == 200
             assert response.headers["x-brain-backend"] == "gpu"
@@ -154,14 +158,46 @@ def test_search_runs_on_the_cpu_while_the_gpu_is_taken():
     run(exercise())
 
 
-def test_brief_gpu_unavailability_does_not_start_the_cpu():
+def test_gpu_search_that_may_be_hanging_also_starts_on_the_cpu():
     async def exercise():
-        async with routed(cpu_grace=0.2) as (router, gpu, cpu, upstreams):
+        async with routed(ready=True, gpu_hedge=0.02) as (router, gpu, cpu, upstreams):
+            upstreams.block["gpu"] = asyncio.Event()
+            response = await router.search(call(), never_disconnected)
+            assert response.headers["x-brain-backend"] == "cpu"
+            assert gpu.active == 0
+            assert router.cpu_attempts == 0
+
+    run(exercise())
+
+
+def test_full_cpu_queue_fails_at_once_while_the_gpu_is_taken():
+    async def exercise():
+        async with routed(cpu_queue_limit=2) as (router, gpu, cpu, upstreams):
+            upstreams.block["cpu"] = asyncio.Event()
+            first = asyncio.create_task(router.search(call(), never_disconnected))
+            second = asyncio.create_task(router.search(call(), never_disconnected))
+            await asyncio.sleep(0.03)
+            assert router.cpu_attempts == 2
+            refused = await router.search(call(), never_disconnected)
+            assert refused.status_code == 503
+            assert refused.headers["retry-after"] == "30"
+            upstreams.block["cpu"].set()
+            assert (await first).status_code == 200
+            assert (await second).status_code == 200
+            assert router.cpu_attempts == 0
+
+    run(exercise())
+
+
+def test_full_cpu_queue_does_not_fail_a_running_gpu_search():
+    async def exercise():
+        async with routed(ready=True, gpu_hedge=0.01, cpu_queue_limit=0) as (router, gpu, cpu, upstreams):
+            upstreams.block["gpu"] = asyncio.Event()
             search = asyncio.create_task(router.search(call(), never_disconnected))
-            await asyncio.sleep(0.02)
-            gpu.ready.set()
+            await asyncio.sleep(0.05)
+            assert not search.done()
+            upstreams.block["gpu"].set()
             assert (await search).headers["x-brain-backend"] == "gpu"
-            assert upstreams.calls == ["gpu"]
 
     run(exercise())
 
@@ -230,7 +266,7 @@ def test_cpu_runs_one_search_at_a_time_and_queued_searches_cost_no_kill():
 
 def test_search_interrupted_on_the_gpu_fails_over_to_the_cpu():
     async def exercise():
-        async with routed(ready=True, cpu_grace=60) as (router, gpu, cpu, upstreams):
+        async with routed(ready=True) as (router, gpu, cpu, upstreams):
             upstreams.fail["gpu"] = 1
             gpu.ready.clear()
             gpu.ready.set()
@@ -612,6 +648,19 @@ def test_gateway_rejects_large_bodies_and_passes_malformed_ones_to_qmd(gateway):
     assert not seen
     assert client.post("/mcp", content=b"not json", headers=MEMBER).status_code == 200
     assert seen[0].content == b"not json"
+
+
+def test_health_fails_on_a_recurring_gpu_failure_and_a_lasting_cpu_outage(gateway):
+    client, seen, gpu, cpu, access = gateway
+    gpu.state = "warming"
+    assert client.get("/healthz").status_code == 200
+    gpu.failing = True
+    assert client.get("/healthz").status_code == 503
+    gpu.failing = False
+    cpu.down = 5
+    assert client.get("/healthz").status_code == 200
+    cpu.down = 61
+    assert client.get("/healthz").status_code == 503
 
 
 @pytest.mark.parametrize("state, ready, status", [

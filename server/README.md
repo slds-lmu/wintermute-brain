@@ -67,9 +67,24 @@ The coordinator checks live request files and Redis RQ queues, intermediate
 queues, and non-expired started-job entries. It drains active searches for
 up to BRAIN_GPU_DRAIN seconds, stops qmd, waits for process exit, then
 releases the flock. A search still running at that deadline is killed with
-qmd and continues on the CPU qmd. The qmd child inherits the descriptor so a
-coordinator failure cannot prematurely release the lock while the child
-still uses the GPU.
+qmd and continues on the CPU qmd. The gateway starts qmd's server directly:
+qmd's launcher is a separate parent process that exits before the server does,
+and waiting for it would release the GPU while the server still held memory.
+The server inherits the descriptor so a coordinator failure cannot prematurely
+release the lock while it still uses the GPU.
+
+Before starting the GPU qmd, the coordinator runs check-gpu.mjs. qmd itself
+falls back to its CPU backend without an error when CUDA is unavailable, which
+would look healthy and leave the slower untuned configuration serving searches.
+A failed check, or any other failure of the GPU qmd, makes /healthz answer 503
+until the GPU qmd is ready again, while the CPU qmd keeps answering.
+
+Index refreshes leave searches running: qmd supports update, embed, and queries
+on one index at a time, through WAL and a 120-second busy timeout. Text indexing
+and embeddings need the GPU lock here, so the index does not change while the
+GPU is taken. The coordinator checks for GPU demand between these steps only,
+so a GPU caller can wait for a running refresh or warmup: usually about ten
+seconds, and minutes at worst.
 
 qmd stays unloaded throughout an OCR batch. After all watched queues and
 requesters are idle for BRAIN_GPU_QUIET seconds, it reacquires the lock,
@@ -81,10 +96,17 @@ resident; its batch and memory-recovery lock requests also trigger handoff.
 ## CPU QMD AND ROUTING
 
 A second qmd process runs with QMD_FORCE_CPU on the same index and model
-files, at nice 19 and without access to the GPU lock. It needs about 50 MB
-while idle and about 6 GB with its models loaded, which it unloads after five
-idle minutes. The image carries its backend, the locked
-@node-llama-cpp/linux-x64 prebuilt.
+files, without access to the GPU lock. It needs about 0.5 GB while idle and
+about 6 GB with its models loaded, which it unloads after five idle minutes.
+The image carries its backend, the locked @node-llama-cpp/linux-x64 prebuilt.
+
+Its nice value of 19 orders it only within the brain-search container, behind
+the gateway and the GPU qmd. It gives no priority over other containers: the
+kernel shares CPU time between their cgroups first, by equal weight, so a CPU
+search competes evenly with a CPU-heavy OCR job. Whisper needs far less than its
+share and is little affected. To favor OCR over CPU searches, lower cpu_shares
+of brain-search in Compose; searches then take longer under load, up to missing
+their deadline.
 
 | Call | Handling |
 | --- | --- |
@@ -97,13 +119,13 @@ Only query uses models: get, multi_get, status, and discovery read SQLite.
 Those calls take no GPU admission, so they work and do not delay a handoff
 in any GPU state.
 
-A search that gets no GPU admission within BRAIN_CPU_GRACE seconds starts
-on the CPU qmd as well, while it keeps waiting for the GPU. The grace period
-keeps index refreshes, which close admission for a fraction of a second,
-from starting CPU work. Responses are returned only once complete, so the
-first complete response wins and the other attempt is abandoned. The answer
-carries X-Brain-Backend. After BRAIN_SEARCH_WAIT seconds without an answer,
-the client receives 503 with Retry-After. The clone/index fallback applies.
+A search the GPU qmd cannot admit starts on the CPU qmd as well, while it keeps
+waiting for the GPU. So does a GPU search still running after BRAIN_GPU_HEDGE
+seconds, which may be hanging. Responses are returned only once complete, so
+the first complete response wins and the other attempt is abandoned. A plain
+answer carries X-Brain-Backend; the gateway logs the winner in every case. After
+BRAIN_SEARCH_WAIT seconds without an answer, the client receives 503 with
+Retry-After. The clone/index fallback applies.
 
 Claude Code abandons a request after 60 seconds without response headers,
 unless MCP_TOOL_TIMEOUT or the server's timeout setting raises that limit, and
@@ -115,11 +137,15 @@ the 503. Cache-Control: no-transform keeps Caddy's encode from buffering it.
 A client that does not accept text/event-stream gets a plain response at the
 end. Claude Code 2.1.318 accepted such an answer after 248 seconds.
 
-The CPU qmd runs one search at a time. qmd cannot cancel a search, and one
-keeps its threads after its client has gone. Abandoning a running search,
+The CPU qmd runs one search at a time, and at most BRAIN_CPU_QUEUE searches may
+run or wait. Further ones receive 503 at once, so that clients fall back to
+the clone/index path instead of waiting for minutes. qmd cannot cancel a search,
+and one keeps its threads after its client has gone. Abandoning a running search,
 because the GPU answered first or the client disconnected, therefore kills
 the process with SIGKILL. The supervisor restarts it in under a second, and
-calls arriving meanwhile retry. An abandoned GPU search runs to completion
+calls arriving meanwhile retry. It also restarts a process that fails three
+health checks in a row, and /healthz answers 503 when the CPU qmd has been
+down for over a minute. An abandoned GPU search runs to completion
 because reloading its models would cost more. Attempts share qmd's persistent
 LLM cache in SQLite, so an expansion finished on the CPU also serves the GPU.
 
@@ -134,9 +160,15 @@ its models have to load first.
 | 10 busy processes | 58-72 s | 10-15 s | 41-49 s |
 | 20 busy processes | 88-116 s | 37-60 s | 47-52 s |
 
-Reranking time grows with the number of candidates, up to 40. Expansion stops
-at 600 tokens, about 30 seconds on an idle CPU, or after qmd's limit of 300
-seconds, in which case qmd searches for the original query alone.
+These are small candidates of about 1,650 characters. A growing corpus will
+take longer: qmd reranks up to 40 candidates of up to 900 tokens. A 900-token
+chunk took 3.6 seconds per reranking context, which suggests about 80 seconds on
+an idle CPU at that limit, and that searches under load would then reach
+BRAIN_SEARCH_WAIT. Measure again when the corpus has grown. candidateLimit is
+the available lever, at some cost in quality.
+
+Expansion stops at 600 tokens, about 30 seconds on an idle CPU, or after qmd's
+limit of 300 seconds, in which case qmd searches for the original query alone.
 
 Thread counts matter on this CPU. Generation yields 21.8 tokens per second
 with 10 threads and 4.6 with 20, the number qmd uses by default, so
@@ -185,7 +217,10 @@ runs, so clients lose nothing.
 | BRAIN_KEEPALIVE | 15 seconds; comment lines on that stream |
 | BRAIN_GPU_SEARCH_TIMEOUT | 180 seconds |
 | BRAIN_CONTROL_WAIT | 30 seconds; calls that need no model |
-| BRAIN_CPU_GRACE | 1 second; GPU wait before a search also starts on the CPU |
+| BRAIN_GPU_HEDGE | 30 seconds; a GPU search then also starts on the CPU |
+| BRAIN_CPU_QUEUE | 4; searches running or waiting on the CPU qmd |
+| BRAIN_CPU_HEALTH_INTERVAL | 30 seconds |
+| BRAIN_QMD_ENTRY | qmd's dist/cli/qmd.js in the image |
 | BRAIN_CPU_PARALLELISM | 2; reranking contexts of the CPU qmd, sharing all vCPUs |
 | BRAIN_CPU_EXPAND_THREADS | Half the vCPUs; query expansion threads of the CPU qmd |
 | BRAIN_CPU_NICE | 19 |
@@ -246,8 +281,10 @@ Content operations continue to use the pinned plugin/tools write path.
     python -m unittest discover -s tests
     ruff check --select E4,E7,E9,F,I server
 
-GET /healthz reports gateway health, qmd state, and indexed revision.
-The gateway remains healthy while yielding the GPU. Deployment validation
+GET /healthz reports gateway health, the GPU qmd's state, whether it is ready,
+and whether the CPU qmd is available. It is public, so it omits the indexed
+revision, which the log records. The gateway remains healthy while yielding the
+GPU. Deployment validation
 must also exercise an authorized MCP search and a multi-job GPU handoff.
 
 CI runs Python 3.10, matching Ubuntu 22.04 in the image, and Python 3.12.

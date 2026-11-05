@@ -95,10 +95,15 @@ def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
 
     @app.get("/healthz")
     async def health():
-        # Public: no content revision here. A failing GPU qmd stays visible to
-        # monitoring although the CPU qmd keeps answering.
+        # Public: no content revision here. A failing qmd stays visible to
+        # monitoring although the other one keeps answering. The CPU qmd may
+        # restart briefly at any time, the GPU qmd is judged by its own record.
         status = app.state.runtime.status()
-        failed = status["state"] in {"starting", "waiting_for_repository", "error", "stopped"}
+        failed = (
+            status["state"] in {"starting", "waiting_for_repository", "error", "stopped"}
+            or status.get("failing", False)
+            or app.state.cpu.down_for() > 60
+        )
         return JSONResponse(
             {
                 "status": "unavailable" if failed else "ok",

@@ -148,9 +148,9 @@ unloaded across a MinerU batch; it reloads after a short idle interval.
 Whisper HTTP stays resident. The index and models are local persistent
 mounts outside images.
 
-A second qmd process runs CPU-only on the same index, at low scheduling
-priority, and never touches the GPU or its lock. It answers every call that
-needs no model. Searches go to the GPU qmd whenever it is available. While
+A second qmd process runs CPU-only on the same index and never touches the
+GPU or its lock. It answers every call that needs no model. Searches go to
+the GPU qmd whenever it is available. While
 it is not, a search also starts on the CPU qmd, one search at a time, and
 the first complete answer wins. Both use the same models and settings, so
 a CPU answer has full quality and only takes longer. qmd cannot cancel a

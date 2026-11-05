@@ -36,7 +36,7 @@ class Call:
     discovery: bool = False
     # The JSON-RPC id, when the client also accepts an SSE response.
     event_id: int | str | None = None
-    gpu_admitted: bool = False
+    gpu_admitted_at: float | None = None
 
 
 def _is_search(message: object) -> bool:
@@ -116,8 +116,11 @@ class Router:
         self.search_wait = float(os.environ.get("BRAIN_SEARCH_WAIT", "280"))
         self.control_wait = float(os.environ.get("BRAIN_CONTROL_WAIT", "30"))
         self.gpu_search_timeout = float(os.environ.get("BRAIN_GPU_SEARCH_TIMEOUT", "180"))
-        # Index refreshes close GPU admission for a fraction of a second.
-        self.cpu_grace = float(os.environ.get("BRAIN_CPU_GRACE", "1"))
+        # A GPU search normally takes seconds: past this, it may be hanging.
+        self.gpu_hedge = float(os.environ.get("BRAIN_GPU_HEDGE", "30"))
+        # Searches on the CPU qmd, running or queued, before others fail at once.
+        self.cpu_queue_limit = int(os.environ.get("BRAIN_CPU_QUEUE", "4"))
+        self.cpu_attempts = 0
         # Claude Code gives up on a request without response headers after 60 s.
         self.answer_wait = float(os.environ.get("BRAIN_ANSWER_WAIT", "20"))
         self.keepalive = float(os.environ.get("BRAIN_KEEPALIVE", "15"))
@@ -175,7 +178,7 @@ class Router:
         if delay:
             await asyncio.sleep(delay)
         async with self.runtime.admission():
-            call.gpu_admitted = True
+            call.gpu_admitted_at = time.monotonic()
             return await self._forward(self.runtime.upstream, call, self.gpu_search_timeout)
 
     async def _cpu_attempt(self, call: Call) -> httpx.Response:
@@ -185,6 +188,7 @@ class Router:
                 return await self._forward(self.cpu.upstream, call, self.search_wait)
             except asyncio.CancelledError:
                 # Disconnecting from qmd does not stop its search.
+                log.info("Abandoning a CPU search: killing the CPU qmd")
                 self.cpu.abort()
                 raise
 
@@ -222,11 +226,20 @@ class Router:
             # Also reached when the client disconnects from the stream.
             race.cancel()
 
+    def _start_cpu_attempt(self, call: Call) -> asyncio.Task:
+        self.cpu_attempts += 1
+        task = asyncio.create_task(self._cpu_attempt(call))
+
+        def finished(_: asyncio.Task) -> None:
+            self.cpu_attempts -= 1
+
+        task.add_done_callback(finished)
+        return task
+
     async def _race(self, call: Call, disconnected: Callable[[], Awaitable[bool]]) -> Response:
         """Run a search on the GPU; while it is taken, race the CPU against it."""
         started = time.monotonic()
         deadline = started + self.search_wait
-        start_cpu_at = started + self.cpu_grace
         gpu = asyncio.create_task(self._gpu_attempt(call))
         cpu = None
         cpu_failures = 0
@@ -245,8 +258,7 @@ class Router:
                         if task is gpu:
                             # qmd was stopped or crashed: wait for the next
                             # admission and let the CPU take over meanwhile.
-                            call.gpu_admitted = False
-                            start_cpu_at = 0
+                            call.gpu_admitted_at = None
                             gpu = asyncio.create_task(self._gpu_attempt(call, delay=1))
                         else:
                             cpu_failures += 1
@@ -255,9 +267,18 @@ class Router:
                     log.info("Search answered by the %s qmd in %.1f s", backend, time.monotonic() - started)
                     return self._reply(response, backend)
                 now = time.monotonic()
-                if cpu is None and not call.gpu_admitted and now >= start_cpu_at and cpu_failures < 3:
-                    cpu = asyncio.create_task(self._cpu_attempt(call))
+                gpu_running = call.gpu_admitted_at is not None
+                if cpu is None and cpu_failures < 3 and (
+                    not gpu_running or now - call.gpu_admitted_at >= self.gpu_hedge
+                ):
+                    if self.cpu_attempts < self.cpu_queue_limit:
+                        cpu = self._start_cpu_attempt(call)
+                    elif not gpu_running:
+                        # Let the client fall back at once rather than after minutes.
+                        log.warning("CPU search queue is full")
+                        return self._unavailable("Search is busy", 30)
                 if now >= deadline:
+                    log.warning("Search gave up after %.0f s", now - started)
                     return self._unavailable("Search is waiting for a free backend", 30)
                 if await disconnected():
                     return Response(status_code=CLIENT_CLOSED)

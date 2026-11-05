@@ -184,6 +184,22 @@ def test_throttled_client_keeps_a_token_it_recently_used():
     run(exercise())
 
 
+def test_throttling_cannot_keep_a_revoked_token_alive():
+    async def exercise():
+        revoked = {"value": False}
+
+        def user():
+            return httpx.Response(401) if revoked["value"] else httpx.Response(200, json={})
+
+        async with github(user) as client:
+            access = RepoAccess(client, "org/repo", allow_ttl=-1, checks_per_minute=1)
+            assert await access.allowed(TOKEN, "198.51.100.1") is True
+            revoked["value"] = True
+            assert await access.allowed(TOKEN, "198.51.100.1") is False
+
+    run(exercise())
+
+
 def test_concurrent_requests_for_one_token_share_one_check():
     async def exercise():
         calls = []

@@ -18,6 +18,13 @@ import redis.asyncio as redis
 import yaml
 
 log = logging.getLogger(__name__)
+GPU_CHECK = Path(__file__).resolve().parents[1] / "check-gpu.mjs"
+
+
+def qmd_server(port: int) -> list[str]:
+    """The server itself: qmd's launcher would be a parent that exits first."""
+    entry = os.environ.get("BRAIN_QMD_ENTRY", "/opt/qmd/node_modules/@tobilu/qmd/dist/cli/qmd.js")
+    return ["node", entry, "mcp", "--http", "--host", "127.0.0.1", "--port", str(port)]
 
 
 def live_gpu_requests(directory: Path) -> bool:
@@ -74,17 +81,21 @@ class QmdRuntime:
         self.cooldown_until = 0.0
         self.last_refresh = 0.0
         self.revision = ""
+        self.failing = False
         self.client = httpx.AsyncClient(timeout=180)
         self.redis = None
         if demand is None:
-            self.redis = redis.from_url(os.environ.get("BRAIN_REDIS_URL", "redis://redis:6379/0"))
+            self.redis = redis.from_url(
+                os.environ.get("BRAIN_REDIS_URL", "redis://redis:6379/0"),
+                socket_timeout=5, socket_connect_timeout=5,
+            )
             demand = QueueDemand(
                 self.redis, os.environ.get("BRAIN_GPU_QUEUES", "mineru,whisper").split(","),
             )
         self.demand = demand
 
     def status(self) -> dict:
-        return {"state": self.state, "ready": self.ready.is_set(), "revision": self.revision}
+        return {"state": self.state, "ready": self.ready.is_set(), "failing": self.failing}
 
     def _acquire_gpu(self) -> bool:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,7 +182,13 @@ class QmdRuntime:
         temporary.replace(self.state_dir / "index.yml")
 
     def environment(self) -> dict:
-        return dict(os.environ, QMD_CONFIG_DIR=str(self.state_dir))
+        environment = {k: v for k, v in os.environ.items() if k != "BRAIN_SEARCH_SERVICE_TOKEN"}
+        environment.update(
+            QMD_CONFIG_DIR=str(self.state_dir),
+            # Set by qmd's launcher for its MCP servers.
+            LLAMA_LOG_LEVEL="error", GGML_LOG_LEVEL="error", GGML_BACKEND_SILENT="1",
+        )
+        return environment
 
     async def command(self, *arguments: str, timeout: float = 180) -> str:
         process = await asyncio.create_subprocess_exec(
@@ -191,13 +208,14 @@ class QmdRuntime:
             raise RuntimeError(f"{arguments[0]} failed ({process.returncode}): {output.decode()[-1500:]}")
         return output.decode()
 
+    async def check_gpu(self) -> None:
+        """qmd falls back to its CPU backend without any error when CUDA fails."""
+        await self.command("node", str(GPU_CHECK))
+
     async def refresh(self) -> None:
-        self.ready.clear()
-        if not await self.drained():
-            log.warning("Skipping this index refresh: qmd searches are still active")
-            self.last_refresh = time.monotonic()
-            return
-        self.state = "indexing"
+        # Searches continue meanwhile: qmd supports this on one index.
+        if not self.ready.is_set():
+            self.state = "indexing"
         # Record the revision before scanning. A pull during embedding must
         # remain visible as a change on the next refresh.
         revision = (await self.command(
@@ -279,12 +297,13 @@ class QmdRuntime:
                 await self.pause()
                 return
             self.configure()
+            await self.check_gpu()
             await self.refresh()
             if await self.busy():
                 await self.pause()
                 return
             self.process = await asyncio.create_subprocess_exec(
-                "qmd", "mcp", "--http", "--host", "127.0.0.1", "--port", "8182",
+                *qmd_server(8182),
                 env=self.environment(), pass_fds=(self.lock.fileno(),),
                 start_new_session=True,
             )
@@ -296,6 +315,7 @@ class QmdRuntime:
             await self.pause()
         else:
             self.state = "ready"
+            self.failing = False
             self.ready.set()
 
     async def _pause_after_error(self) -> None:
@@ -315,6 +335,7 @@ class QmdRuntime:
                     raise
                 except Exception:
                     log.exception("qmd coordinator failed; releasing the GPU")
+                    self.failing = True
                     await self._pause_after_error()
                     await asyncio.sleep(5)
                 await asyncio.sleep(self.poll)
@@ -346,7 +367,9 @@ class CpuQmd:
             "BRAIN_CPU_EXPAND_THREADS", str(max(1, (os.cpu_count() or 2) // 2)),
         )
         self.startup_timeout = float(os.environ.get("BRAIN_CPU_STARTUP", "60"))
+        self.health_interval = float(os.environ.get("BRAIN_CPU_HEALTH_INTERVAL", "30"))
         self.available = asyncio.Event()
+        self.down_since = time.monotonic()
         self.search_slot = asyncio.Semaphore(1)
         self.process = None
         self.aborted = False
@@ -362,9 +385,14 @@ class CpuQmd:
             CUDA_VISIBLE_DEVICES="",
         )
 
+    def down_for(self) -> float:
+        return 0 if self.available.is_set() else time.monotonic() - self.down_since
+
     def abort(self) -> None:
         """Stop all work now. Synchronous, so that a cancelled task can call it."""
-        self.available.clear()
+        if self.available.is_set():
+            self.down_since = time.monotonic()
+            self.available.clear()
         if self.process is not None and self.process.returncode is None:
             self.aborted = True
             os.killpg(self.process.pid, signal.SIGKILL)
@@ -373,8 +401,7 @@ class CpuQmd:
         self.runtime.configure()
         # No pass_fds: this process must never share the GPU lock.
         self.process = await asyncio.create_subprocess_exec(
-            "nice", "-n", self.nice,
-            "qmd", "mcp", "--http", "--host", "127.0.0.1", "--port", str(self.port),
+            "nice", "-n", self.nice, *qmd_server(self.port),
             env=self.environment(), start_new_session=True,
         )
         deadline = time.monotonic() + self.startup_timeout
@@ -391,6 +418,23 @@ class CpuQmd:
                 return
         raise RuntimeError("CPU qmd startup timed out")
 
+    async def _watch(self) -> None:
+        """Return when the process has exited or stopped answering."""
+        failures = 0
+        while failures < 3:
+            try:
+                await asyncio.wait_for(self.process.wait(), self.health_interval)
+                return
+            except asyncio.TimeoutError:
+                pass
+            try:
+                response = await self.client.get(self.upstream + "/health", timeout=10)
+                response.raise_for_status()
+                failures = 0
+            except httpx.HTTPError:
+                failures += 1
+        log.warning("CPU qmd stopped answering; restarting")
+
     async def run(self) -> None:
         try:
             while True:
@@ -400,7 +444,7 @@ class CpuQmd:
                 self.aborted = False
                 try:
                     await self._start()
-                    await self.process.wait()
+                    await self._watch()
                 except asyncio.CancelledError:
                     raise
                 except Exception:
