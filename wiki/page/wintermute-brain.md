@@ -58,7 +58,17 @@ Marc's PR #1 (`d0cd9e1`) implemented the MVP from specs 00–06; 38 tests pass a
 
 ## First live test
 
-Two live ingests on 2026-11-05 passed (PRs #2 and #4 merged). `commit-op` first reported a merged PR as failed because the `slds-write` token gets 403 on check runs; it now uses the PR state plus the Actions workflow run, waits 10 minutes, and returns exit code 4 ("outcome unknown") without closing the PR, so agents must not redo the operation. Members and the server clone over HTTPS; the host's shared clone stays on SSH, because changing its remote broke the host's pushes. Open gap: no check covers `source.yaml` metadata, after an author's full name was filled in from memory. Members need gitleaks and defuddle (to be added to the slds docker image) [First live test digest](/wiki/source/src-20261105-wintermute-brain-first-live-brain-test-commit-o-98411f.md).
+Two live ingests on 2026-11-05 passed (PRs #2 and #4 merged). `commit-op` first reported a merged PR as failed because the `slds-write` token gets 403 on check runs; it now uses the PR state plus the Actions workflow run, waits 10 minutes, and returns exit code 4 ("outcome unknown") without closing the PR, so agents must not redo the operation. Members and the server clone over HTTPS; the host's shared clone stays on SSH, because changing its remote broke the host's pushes. Members need gitleaks and defuddle (to be added to the slds docker image) [First live test digest](/wiki/source/src-20261105-wintermute-brain-first-live-brain-test-commit-o-98411f.md).
+
+## Metadata check, plans and reasons
+
+`tools/check_evidence` now flags any `title` or author in `source.yaml` that does not appear in the fetched source; DOI/arXiv-sourced metadata and session digests are exempt, and the first ingest (karpathy-2026-llm-wiki) is a known flagged case. Every ingest, compile and edit commit carries the planned pages (`Planned:`) and one reason per changed page (`Reasons:`); `tools/commit-op` refuses a commit without them [Source-metadata digest](/wiki/source/src-20261105-wintermute-brain-source-metadata-check-commit-r-98411f.md).
+
+Shared Obsidian settings: the repo ships `.obsidian/app.json` with `useMarkdownLinks: true` and `newLinkFormat: absolute`; the link check passed, links resolve and backlinks show [Source-metadata digest](/wiki/source/src-20261105-wintermute-brain-source-metadata-check-commit-r-98411f.md).
+
+## GitHub plan and limits
+
+`slds-lmu` is on the Team plan with 307 seats, 182 in use. Actions use in 2026 was 600–1,000 minutes a month, peak 3,217 in May, net cost $0 except $4.26 in July; LFS storage is about 5 GB at net cost $0. Automatic session digests could add roughly 1,000–2,000 Actions minutes a month (an estimate, not measured); mitigations named: skip the index run for raw-only PRs, or run workflows on the group server. The owner gave the `slds-write` token org-level "Administration: Read-only" to read billing, accepting that it exposes all org settings [Source-metadata digest](/wiki/source/src-20261105-wintermute-brain-source-metadata-check-commit-r-98411f.md).
 
 ## GitHub tokens
 
@@ -66,4 +76,4 @@ A fine-grained PAT has one resource owner, so each owner needs its own token. To
 
 ## Open checks
 
-LFS limits of the `slds-lmu` plan, GitHub Actions minutes for a private repo, and who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open: the PDF converter benchmark, qmd at scale, and the Obsidian link check [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md). Still open: qmd keyword search from the start versus grep-only wording, and cleanup of stale spec text [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
+Who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open (handed to Marc): qmd at scale and the PDF converter benchmark (the Obsidian link check passed) [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md). Still open: qmd keyword search from the start versus grep-only wording, and cleanup of stale spec text [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
