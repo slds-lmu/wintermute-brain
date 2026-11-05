@@ -153,3 +153,8 @@ App is installed on the code and content repos; git and gh renew their
 installation tokens without periodic worker restarts.
 
 Operational details and validation commands are in server/README.md.
+
+MCP response bodies stream through the gateway. Notification listeners
+remain outside the GPU operation count, so indexing and model handoff
+can proceed while clients are connected. Search calls retain admission
+until completion or disconnect.

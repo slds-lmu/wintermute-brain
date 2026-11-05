@@ -125,7 +125,7 @@ class QmdRuntime:
                 os.killpg(self.process.pid, signal.SIGTERM)
                 try:
                     await asyncio.wait_for(self.process.wait(), 30)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     os.killpg(self.process.pid, signal.SIGKILL)
                     await self.process.wait()
             self.process = None

@@ -22,13 +22,16 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - run: pip install -r server/requirements.txt pytest fakeredis ruff
       - run: python -m pytest server/tests
       - run: python -m unittest discover -s tests

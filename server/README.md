@@ -67,6 +67,12 @@ Search requests wait up to BRAIN_SEARCH_WAIT seconds for GPU availability,
 then receive HTTP 503 with Retry-After. The normal clone/index fallback
 still applies. Running GPU operations finish before a handoff.
 
+The gateway forwards response chunks immediately and closes upstream
+connections when clients disconnect. GET and subscriptions/listen streams
+do not count as active GPU operations; an idle notification listener must
+not block indexing or model unloading. Ordinary calls retain admission
+until their response finishes.
+
 ## CONFIGURATION
 
 | Variable | Default or purpose |
@@ -96,7 +102,7 @@ still applies. Running GPU operations finish before a handoff.
 | QMD_EMBED_PARALLELISM | 1; bounds concurrent model contexts |
 
 The App requires Contents, Pull requests, and Issues write access, plus
-Actions read access for merge verification. It is installed on this
+Actions read access for merge verification. It is installed on the
 code and content repositories. The credential helper and gh wrapper renew installation
 tokens before expiry. The worker does not require periodic restarts or a
 personal deployment token.
@@ -145,3 +151,6 @@ Content operations continue to use the pinned plugin/tools write path.
 GET /healthz reports gateway health, qmd state, and indexed revision.
 The gateway remains healthy while yielding the GPU. Deployment validation
 must also exercise an authorized MCP search and a multi-job GPU handoff.
+
+CI runs Python 3.10, matching Ubuntu 22.04 in the image, and Python 3.12.
+Use asyncio.TimeoutError for asyncio deadlines on both versions.

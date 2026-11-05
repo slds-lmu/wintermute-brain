@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -12,7 +13,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .runtime import QmdRuntime
 
@@ -21,6 +22,38 @@ HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
 }
+
+
+class McpResponse(StreamingResponse):
+    def __init__(self, upstream, admission=None):
+        self.upstream = upstream
+        self.admission = admission
+        super().__init__(
+            self.chunks(), status_code=upstream.status_code,
+            headers={
+                k: v for k, v in upstream.headers.items()
+                if k.lower() not in HOP_HEADERS | {"content-encoding"}
+            },
+        )
+
+    async def chunks(self):
+        try:
+            async for chunk in self.upstream.aiter_bytes():
+                yield chunk
+        except httpx.HTTPError:
+            if self.admission is not None:
+                raise
+            log.debug("qmd notification stream closed")
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            try:
+                await self.upstream.aclose()
+            finally:
+                if self.admission is not None:
+                    await self.admission.__aexit__(None, None, None)
 
 
 class RepoAccess:
@@ -118,19 +151,31 @@ def create_app(runtime=None, access=None) -> FastAPI:
             if k.lower() not in HOP_HEADERS | {"authorization", "origin", "accept-encoding"}
         }
         try:
-            async with app.state.runtime.admission():
-                response = await app.state.qmd.request(
-                    request.method, app.state.runtime.upstream + "/mcp",
-                    content=bytes(body), headers=headers,
-                )
-            return Response(
-                response.content, status_code=response.status_code,
-                headers={
-                    k: v for k, v in response.headers.items()
-                    if k.lower() not in HOP_HEADERS | {"content-encoding"}
-                },
+            payload = json.loads(body) if body else {}
+        except ValueError:
+            payload = {}
+        # Subscription streams stay open between searches. They must not
+        # prevent indexing or GPU handoff while the client remains connected.
+        listener = request.method == "GET" or (
+            isinstance(payload, dict) and payload.get("method") == "subscriptions/listen"
+        )
+        admission = app.state.runtime.admission()
+        entered = False
+        try:
+            await admission.__aenter__()
+            entered = True
+            upstream_request = app.state.qmd.build_request(
+                request.method, app.state.runtime.upstream + "/mcp",
+                content=bytes(body), headers=headers,
             )
-        except TimeoutError:
+            response = await app.state.qmd.send(upstream_request, stream=True)
+            if listener:
+                await admission.__aexit__(None, None, None)
+                entered = False
+            result = McpResponse(response, admission if entered else None)
+            entered = False
+            return result
+        except asyncio.TimeoutError:
             return JSONResponse(
                 {"detail": "Search is waiting for the GPU", "state": app.state.runtime.state},
                 status_code=503, headers={"Retry-After": "5"},
@@ -138,6 +183,9 @@ def create_app(runtime=None, access=None) -> FastAPI:
         except httpx.HTTPError:
             log.warning("qmd request failed")
             return JSONResponse({"detail": "Search backend unavailable"}, status_code=502)
+        finally:
+            if entered:
+                await admission.__aexit__(None, None, None)
 
     return app
 

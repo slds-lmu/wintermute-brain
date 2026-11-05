@@ -251,13 +251,88 @@ class GatewayRuntime:
     @asynccontextmanager
     async def admission(self):
         if self.busy:
-            raise TimeoutError
+            raise asyncio.TimeoutError
         yield
 
 
 class Access:
     async def allowed(self, token):
         return token == "member-token"
+
+
+@pytest.mark.parametrize("method,rpc_method,active", [
+    ("POST", "subscriptions/listen", 0),
+    ("GET", None, 0),
+    ("POST", "tools/call", 1),
+])
+def test_gateway_streams_before_eof_and_releases_admission_on_disconnect(method, rpc_method, active):
+    async def exercise():
+        class TrackedRuntime(GatewayRuntime):
+            active = 0
+
+            @asynccontextmanager
+            async def admission(self):
+                self.active += 1
+                try:
+                    yield
+                finally:
+                    self.active -= 1
+
+        class OpenStream(httpx.AsyncByteStream):
+            closed = False
+
+            async def __aiter__(self):
+                yield b"event: message\ndata: {}\n\n"
+                await asyncio.Event().wait()
+
+            async def aclose(self):
+                self.closed = True
+
+        runtime = TrackedRuntime()
+        stream = OpenStream()
+        app = create_app(runtime=runtime, access=Access())
+        disconnect = asyncio.Event()
+        first_chunk = asyncio.Event()
+        received = False
+
+        async def receive():
+            nonlocal received
+            if not received:
+                received = True
+                return {"type": "http.request", "body": json.dumps({"method": rpc_method}).encode()}
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message.get("body"):
+                first_chunk.set()
+
+        scope = {
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1", "method": method, "scheme": "http",
+            "path": "/mcp", "raw_path": b"/mcp", "query_string": b"", "root_path": "",
+            "headers": [(b"authorization", b"Bearer member-token")],
+            "client": ("127.0.0.1", 1), "server": ("test", 80),
+        }
+        async with app.router.lifespan_context(app), httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=stream,
+            )),
+        ) as upstream:
+            app.state.qmd = upstream
+            request = asyncio.create_task(app(scope, receive, send))
+            try:
+                await asyncio.wait_for(first_chunk.wait(), 1)
+                assert not request.done()
+                assert runtime.active == active
+                assert not stream.closed
+            finally:
+                disconnect.set()
+                await asyncio.wait_for(request, 1)
+            assert stream.closed
+            assert runtime.active == 0
+
+    asyncio.run(exercise())
 
 
 def test_gateway_auth_protocol_and_gpu_wait(monkeypatch):
