@@ -26,22 +26,22 @@ Specs 00–06 accepted; this repo *is* the brain repo (later
 | Session digests: Stop/SessionStart/SessionEnd hooks, background digest agent (Haiku), gitleaks, raw-only PR via the GitHub API | `plugin/scripts/` | 02 § 2 |
 | Server: compile worker (poll, derived queue, 3 tries + backoff, qmd re-index), GitHub App token, qmd auth proxy, systemd units | `server/` | 06, 02 § 2.4 |
 
-## 2. Decisions taken while implementing (owner to confirm)
+## 2. Decisions taken while implementing (made by Marc's agent in PR #1; all reviewed by the owner 2026-11-05)
 
-- **One repo.** Brain content, `tools/`, `plugin/` and `server/` live in
+- **SUPERSEDED (owner, 2026-11-05) by the code/content split (01 § 1, K32).** **One repo.** Brain content, `tools/`, `plugin/` and `server/` live in
   this repo; the wintermute marketplace points at `plugin/`.
-- **Session digest ids:** `src-YYYYMMDD-<repo>-<title>-<sid6>` (first 6
+- **CONFIRMED (owner, 2026-11-05).** **Session digest ids:** `src-YYYYMMDD-<repo>-<title>-<sid6>` (first 6
   chars of the session id), so parallel digests never collide.
   Checkpoints are derived from `source.yaml` (`session`, `messages`); a
   local cache speeds it up.
-- **Digest trigger:** 20 new human turns, or 30 minutes since the last
+- **CONFIRMED (owner, 2026-11-05).** **Digest trigger:** 20 new human turns, or 30 minutes since the last
   digest with at least 3 new turns; session start/end flush needs 3.
-- **Index Action also applies the safe link fix** on `main` (Obsidian's
+- **CONFIRMED (owner, 2026-11-05).** **Index Action also applies the safe link fix** on `main` (Obsidian's
   slash-less links).
-- **Compile worker model:** `sonnet` by default (`BRAIN_MODEL`).
-- **Lint levels:** slash-less links are a warning (auto-fixed on main);
+- **CONFIRMED (owner, 2026-11-05; review cost after the first weeks).** **Compile worker model:** `sonnet` by default (`BRAIN_MODEL`).
+- **CONFIRMED (owner, 2026-11-05).** **Lint levels:** slash-less links are a warning (auto-fixed on main);
   relative and broken links are errors; open Disputed blocks are `info`.
-- `tools/lint --check-index` runs only on pushes to `main` (PRs never
+- **CONFIRMED (owner, 2026-11-05).** `lint --check-index` runs only on pushes to `main` (PRs never
   carry index files).
 
 ## 3. GitHub setup (done 2026-11-05)
