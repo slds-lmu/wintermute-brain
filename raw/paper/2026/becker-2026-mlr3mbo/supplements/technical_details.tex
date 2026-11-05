@@ -1,0 +1,10 @@
+\subsection*{Technical Details}
+\label{sec:technical-details}
+
+This section provides more details on the technical settings that were not considered in the CD procedure.
+The function evaluation budget of the acquisition function optimization was set to $100 \cdot d^2$ evaluations.
+DIRECT and L-BFGS-B were randomly restarted for $5 \cdot d$ times and CMA-ES and LS were restarted until the global budget was exhausted.
+The random forest implementation in mlr3mbo uses the ranger package\cite{wright2017} with the following settings different from the default: \texttt{sample.fraction = 1}, \texttt{min.node.size = 3}, \texttt{min.bucket = 3}, \texttt{mtry.ratio = 5/6}.
+The Gaussian process implementation in mlr3mbo uses the DiceKriging package\cite{roustant2012} with the \texttt{optim.method} changed to \texttt{"gen"}.
+The $\lambda$ and $\epsilon$ decays reduce the value of the parameters by 1\% in each iteration.
+

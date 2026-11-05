@@ -1,0 +1,45 @@
+\subsection*{Uncertainty Estimation}
+\label{sec:uncertainty-estimation}
+
+To estimate the uncertainty of a random forest prediction, three methods are available in \texttt{mlr3mbo}: Jackknife-after-bootstrap, ensemble variance, and the law of total variance.
+Let $t_b$ be the trees in the forest, with $b \in \{1, \ldots, B\}$. 
+Define the average of all predictors, i.e.\ the prediction of the random forest, to be $\bar{f}(x) = \frac{1}{B} \sum_{b=1}^B t_b(x)$. 
+
+For \textbf{jackknife-after-bootstrap}\cite{wager2014}:
+Let $N_{b,i}$ be the number of times observation $i$ occurs in-bag for tree $b$ in the bootstrap.
+Then 
+\begin{displaymath}
+f_{-i}(x) = \frac{1}{B_i} \sum_{b: N_{b,i} = 0} t_b(x),  \qquad B_i = \left|\{b: N_{b,i} = 0\}\right|
+\end{displaymath}
+is the "leave-$i$-out" predictor using all trees for which observation $i$ was out-of-bag.
+The predictive variance $\widehat{\sigma}^2_J(x)$ is then estimated by:
+
+\begin{displaymath}
+\widehat{\sigma}^2_J(x) = \max\left(\frac{n - 1}{n} \sum_{i=1}^{n} \left( f_{-i}(x) -  \bar{f}(x) \right)^2 - (e - 1)\frac{n}{B^2}\sum_{b=1}^{B}\left(t_b(x)-\bar{f}(x)\right)^2, 0\right)\textrm{,}
+\end{displaymath}
+where the second sum term is a finite sample Monte Carlo bias correction.
+
+
+For \textbf{ensemble variance}\cite{hutter2014}:
+Consider a fixed test observation $x$.
+For each tree $t_b$, compute the empirical mean $\mu_b$ of the training data points that fall into the predicted leaf node of $x$.
+This means in particular that $\mu_b=t_b(x)$ and $\bar{f}(x)=\frac{1}{B}\sum_{b=1}^{B}\mu_b$.
+The (naive) ensemble variance is then
+\begin{displaymath}
+  \sigma_{\mathrm{ev}}^2(x)=\frac{1}{B-1}\sum_{b=1}^{B}\left(\mu_b-\bar{f}(x)\right)^2
+\end{displaymath}
+
+For \textbf{law of total variance}\cite{hutter2014}: Again, in a similar fashion, consider a fixed $x$.
+For each tree $t_b$, compute the empirical mean $\mu_b$ and variance $\sigma_b^2$ of the training data points that fall into the predicted leaf node of $x$.
+The variance prediction $\hat{\sigma}_{\mathrm{ltv}}^2$ is the mean of the variance $\sigma_b^2$ of the leaf nodes plus the variance of the means $\mu_b$ of the leaf nodes:
+
+\begin{align*}
+\hat{\sigma}_{\mathrm{ltv}}^2(x) &=\frac{1}{B} \sum_{b=1}^{B} \sigma_b^2
++ \frac{1}{B}\sum_{b=1}^{B}\left(\mu_b-\bar{f}(x)\right)^2\\
+&=\frac{1}{B} \sum_{b=1}^{B} \left(\sigma_b^2 + \mu_b^2\right)-\bar{f}(x)^2
+\end{align*}
+
+This captures the noise each tree sees within its leaf and the disagreements between the trees.
+To avoid underestimating uncertainty, sometimes a minimum variance, of e.g., $10^{-2}$ is assigned to leaf nodes with small $\sigma_b^2$.
+This approach ensures that predictions in regions with limited data reflect the inherent uncertainty.
+

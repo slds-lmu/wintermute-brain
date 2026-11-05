@@ -1,0 +1,28 @@
+\subsection*{Local Search}
+\label{sec:local-search}
+
+The local search (LS) acquisition function optimizer in the \texttt{bbotk} package works similarly to the LS implementation in SMAC\cite{lindauer2022} and can be used to optimize acquisition functions in mixed spaces.
+%Therefore, it is described here in more detail.
+To reduce function call overhead, $k$ LS runs are generated concurrently, so that as many points as possible can be passed to the SM in a single batch.
+
+Each LS run is executed for a specified number of iterations.
+In each iteration, the LS generates multiple candidate neighbors by mutating the current point / incumbent.
+A neighbor is obtained by mutating exactly one parameter from the current point.
+For numeric parameters, the parameter value is first scaled to $[0, 1]$, zero-mean Gaussian noise (with standard deviation governed by a control parameter) is added, and the result is then rescaled to the original domain.
+Afterwards, the value is clipped to the corresponding lower and upper bounds.
+For integer parameters, the same procedure is applied, but the result is rounded to the nearest integer.
+For factor parameters, a new level is sampled uniformly from the levels that differ from the current one.
+For logical parameters, the value is simply flipped.
+
+Hierarchical dependencies in the search space are handled as follows.
+Only active parameters are eligible for mutation.
+After a mutation occurs, all conditions in the search space are checked in topological order.
+If a condition is not satisfied, the corresponding parameter is marked as inactive.
+Conversely, if all conditions for a parameter are satisfied but it is marked as inactive, it is assigned a random valid value.
+
+After the neighbors are generated, they are evaluated using the acquisition function.
+The number of candidates passed to the SM simultaneously is therefore $k$ times the number of neighbors generated per LS run. 
+For each LS, the best neighbor is selected as the new incumbent unless all neighbors are worse than the current incumbent, in which case the incumbent is retained.
+To avoid getting stuck in local optima, the algorithm employs a restart mechanism: 
+For each LS, the number of consecutive iterations without improvement is tracked, and if this 
+exceeds a specified threshold, the search is restarted from a new random point in the search space.
