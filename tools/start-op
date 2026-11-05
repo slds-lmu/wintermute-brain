@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Start (or discard) an operation worktree (03 § 2, step 1).
+
+Context: every writing operation works in a fresh worktree on a branch
+`op/<agent>/<YYYYMMDD-HHMMSS>` created from the current upstream main,
+then commits through tools/commit-op. Worktrees live under
+`.worktrees/` in the main clone (gitignored). The base commit is the
+branch's starting point; commit-op reads it as merge-base with upstream.
+
+Usage
+  tools/start-op --agent NAME [--upstream origin/main]   prints the worktree path
+  tools/start-op --discard PATH                            removes worktree and branch
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brainlib import GitError, git, load_agents, ref_exists, repo_root  # noqa: E402
+
+
+def upstream_ref(root: Path, wanted: str) -> str:
+    """origin/main after a fetch; falls back to local main when there is no
+    remote (local-only setups and tests)."""
+    if ref_exists(wanted, root) or "/" in wanted:
+        remote = wanted.split("/", 1)[0]
+        if remote in git(["remote"], root).split():
+            git(["fetch", "--quiet", remote], root)
+            return wanted
+    return "main" if ref_exists("main", root) else "HEAD"
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--agent")
+    ap.add_argument("--upstream", default="origin/main")
+    ap.add_argument("--discard", type=Path)
+    ap.add_argument("--root", type=Path)
+    args = ap.parse_args(argv)
+    root = (args.root or repo_root()).resolve()
+
+    if args.discard:
+        wt = args.discard.resolve()
+        branch = git(["rev-parse", "--abbrev-ref", "HEAD"], wt, check=False).strip() if wt.is_dir() else ""
+        git(["worktree", "remove", "--force", str(wt)], root, check=False)
+        if branch and branch != "HEAD":
+            git(["branch", "-D", branch], root, check=False)
+        git(["worktree", "prune"], root, check=False)
+        print(f"discarded {wt}")
+        return 0
+
+    if not args.agent:
+        ap.error("--agent is required (see agents.txt)")
+    if args.agent not in load_agents(root):
+        print(f"error: unknown agent {args.agent!r}; see agents.txt", file=sys.stderr)
+        return 2
+    try:
+        base_ref = upstream_ref(root, args.upstream)
+    except GitError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    branch = f"op/{args.agent}/{stamp}"
+    n = 0
+    while ref_exists(f"refs/heads/{branch}", root):
+        n += 1
+        branch = f"op/{args.agent}/{stamp}-{n}"
+    wt = root / ".worktrees" / branch.replace("/", "-")
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    git(["worktree", "add", "--quiet", "-b", branch, str(wt), base_ref], root)
+    print(wt)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

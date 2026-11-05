@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Post a report to the standing "Brain health" GitHub issue (03 § 5.3).
+
+Context: everything that runs unattended (CI lint on main, the compile
+worker, session digests, the index Action) reports findings and failed
+operations as one comment per event on a single issue, so people can
+subscribe to it. Interactive runs show findings in the session instead.
+Needs `gh` with access to the repo (member token, Actions token or the
+server's GitHub App token).
+
+Usage: tools/report-health --repo OWNER/NAME --title "lint on main: 3 errors"
+           [--agent NAME] [--ref SHA] (--body-file F | --body TEXT | stdin)
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import subprocess
+import sys
+
+ISSUE_TITLE = "Brain health"
+
+
+def gh(args: list[str]) -> str:
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise SystemExit(f"gh {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def find_or_create_issue(repo: str) -> int:
+    out = gh(["issue", "list", "--repo", repo, "--state", "open", "--search", f'"{ISSUE_TITLE}" in:title', "--json", "number,title"])
+    for issue in json.loads(out or "[]"):
+        if issue["title"].strip().lower() == ISSUE_TITLE.lower():
+            return int(issue["number"])
+    body = ("Standing issue for unattended reports (03 § 5.3): lint runs with findings, failed operations, "
+            "worker and digest problems. Subscribe to get notified. One comment per event; never close it.")
+    url = gh(["issue", "create", "--repo", repo, "--title", ISSUE_TITLE, "--body", body]).strip()
+    return int(url.rstrip("/").rsplit("/", 1)[-1])
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--repo", required=True)
+    ap.add_argument("--title", required=True)
+    ap.add_argument("--agent", default="")
+    ap.add_argument("--ref", default="")
+    ap.add_argument("--body")
+    ap.add_argument("--body-file")
+    args = ap.parse_args(argv)
+    if args.body_file:
+        body = open(args.body_file, encoding="utf-8").read()
+    elif args.body is not None:
+        body = args.body
+    else:
+        body = sys.stdin.read()
+    when = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    header = f"**{args.title}**\n\n- when: {when}"
+    if args.agent:
+        header += f"\n- agent: {args.agent}"
+    if args.ref:
+        header += f"\n- commit: {args.ref}"
+    comment = f"{header}\n\n{body.strip()}\n"
+    number = find_or_create_issue(args.repo)
+    gh(["issue", "comment", str(number), "--repo", args.repo, "--body", comment])
+    print(f"reported to {args.repo}#{number}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

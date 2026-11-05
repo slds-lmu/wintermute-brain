@@ -1,0 +1,17 @@
+# systemd unit for the qmd MCP auth proxy (06 § 3). qmd itself runs as a
+# separate service on 127.0.0.1:8182 (`qmd mcp --http --port 8182`; check
+# the pinned qmd version's flags). Put TLS in front (caddy/nginx).
+[Unit]
+Description=SLDS brain qmd auth proxy
+After=network-online.target
+
+[Service]
+Type=simple
+User=brain
+EnvironmentFile=/etc/brain/worker.env
+ExecStart=python3 ${BRAIN_DIR}/server/qmd-mcp-proxy.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

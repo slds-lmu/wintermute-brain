@@ -1,0 +1,9 @@
+id: karpathy-2026-llm-wiki
+channel: paper
+title: "LLM Wiki"
+url: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+authors: [Andrej Karpathy]
+published: 2026-04-02
+retrieved: 2026-10-29
+ingested_by: bernd-bischl
+files: [page.md]

@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "wintermute": {
+      "source": { "source": "git", "url": "git@github.com:slds-lmu/wintermute.git" }
+    }
+  },
+  "enabledPlugins": {
+    "brain@wintermute": true
+  }
+}

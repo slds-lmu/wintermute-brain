@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""The agents' only write path (03 § 2, v0-foundation A2, 01 § 5.3).
+
+Context: run inside an operation worktree made by tools/start-op, after
+the agent has written its pages. Agents never run plain `git commit`.
+In order:
+  1. regenerate all index files locally (they are not committed; the
+     index Action regenerates them on main);
+  2. mechanical lint with safe fixes on the changed files; abort on errors
+     (this includes the lock and protected-human-line rules);
+  3. fetch upstream and check the preconditions against base B (the
+     branch point): every changed file is unchanged upstream since B,
+     every created file does not exist upstream;
+  4. commit with the agent as git author and the message convention of
+     03 § 6, rebase onto upstream, push the branch, open a PR with
+     auto-merge (rebase), and optionally wait for the merge.
+
+Exit codes: 0 merged/pushed; 1 lint error or precondition failed or
+conflict (redo the operation from a fresh worktree); 2 PR rejected or
+could not merge (same); 3 usage or environment error.
+
+Usage
+  tools/commit-op --agent NAME --invoked-by PERSON -m "ingest(web): slug"
+      [--disposition New|Update|Disputed|No material] [--source URL]
+      [--note TEXT] [--overrides /wiki/paper/x.md ...]
+      [--upstream origin/main] [--no-pr] [--wait SECONDS] [--cleanup]
+  tools/commit-op --check --base REV --head REV [--upstream origin/main]
+      preconditions only (used by the GitHub check)
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brainlib import (  # noqa: E402
+    GitError, changed_files, git, git_ok, is_index_file, load_agents, ref_exists,
+    repo_root, worktree_changes,
+)
+
+TOOLS = Path(__file__).resolve().parent
+SUBJECT_RE = re.compile(r"^(ingest\([a-z]+\)|compile|lint|edit|index|schema|query): \S.*$")
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def log(msg: str) -> None:
+    print(f"commit-op: {msg}", flush=True)
+
+
+def upstream_ref(root: Path, wanted: str) -> str:
+    remote = wanted.split("/", 1)[0] if "/" in wanted else None
+    if remote and remote in git(["remote"], root).split():
+        git(["fetch", "--quiet", remote], root)
+        return wanted
+    return "main" if ref_exists("main", root) else "HEAD"
+
+
+def is_index(rel: str) -> bool:
+    return (rel == "index.md") or (rel.startswith("wiki/") and is_index_file(Path(rel)))
+
+
+def precondition_violations(root: Path, base: str, upstream: str, changes: list[tuple[str, str]]) -> list[str]:
+    """03 § 2.3: files changed since B must be unchanged upstream; created
+    files must not exist upstream. Index files are exempt (not committed)."""
+    problems = []
+    upstream_changed = {rel for _, rel in changed_files(base, upstream, root)}
+    for status, rel in changes:
+        if is_index(rel):
+            continue
+        if status == "A":
+            if git_ok(["cat-file", "-e", f"{upstream}:{rel}"], root):
+                problems.append(f"{rel}: created here but already exists upstream (redo as an update)")
+        elif rel in upstream_changed:
+            problems.append(f"{rel}: changed upstream since the operation started (re-read and redo)")
+    return problems
+
+
+def pages_trailer(changes: list[tuple[str, str]]) -> str:
+    marks = {"A": "+", "M": "~", "D": "-", "T": "~"}
+    items = []
+    for status, rel in changes:
+        if is_index(rel):
+            continue
+        if rel.startswith("wiki/") and rel.endswith(".md"):
+            items.append(marks.get(status, "~") + rel[len("wiki/"):-3])
+        elif rel.startswith("raw/"):
+            parts = rel.split("/")
+            if len(parts) >= 4:
+                item = "/".join(parts[:4])
+                mark = marks.get(status, "~") + item
+                if mark not in items:
+                    items.append(mark)
+        else:
+            items.append(marks.get(status, "~") + rel)
+    return ", ".join(items)
+
+
+def build_message(args: argparse.Namespace, changes: list[tuple[str, str]]) -> str:
+    lines = [args.message, ""]
+    if args.disposition:
+        lines.append(f"Disposition: {args.disposition}")
+    if args.source:
+        lines.append(f"Source: {args.source}")
+    lines.append(f"Pages: {pages_trailer(changes) or '(none)'}")
+    lines.append(f"Invoked-by: {args.invoked_by}")
+    lines.append(f"Agent: {args.agent}")
+    for o in args.overrides or []:
+        lines.append(f"Overrides-human: {o}")
+    if args.note:
+        lines.append(f"Note: {args.note}")
+    return "\n".join(lines) + "\n"
+
+
+def revert_index_files(root: Path, base: str) -> None:
+    """Index files are regenerated on main by the Action; keep them out of
+    the commit so parallel PRs never conflict on them (03 § 2.1)."""
+    for status, rel in worktree_changes(base, root):
+        if not is_index(rel):
+            continue
+        if git_ok(["cat-file", "-e", f"{base}:{rel}"], root):
+            git(["checkout", base, "--", rel], root)
+        else:
+            (root / rel).unlink(missing_ok=True)
+
+
+def run_lint(root: Path, base: str, agent: str, overrides: list[str]) -> bool:
+    cmd = [sys.executable, str(TOOLS / "lint"), "--fix", "--scope", "changed", "--base", base, "--agent", agent, "--root", str(root)]
+    for o in overrides:
+        cmd += ["--overrides", o]
+    proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
+    sys.stdout.write(proc.stdout)
+    if proc.stderr.strip():
+        sys.stderr.write(proc.stderr)
+    return proc.returncode == 0
+
+
+def gh(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
+    proc = subprocess.run(["gh", *args], cwd=cwd, capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise GitError(f"gh {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc
+
+
+def wait_for_merge(root: Path, pr: str, seconds: int) -> tuple[bool, str]:
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        proc = gh(["pr", "view", pr, "--json", "state,mergedAt,statusCheckRollup"], root, check=False)
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout or "{}")
+            if data.get("state") == "MERGED":
+                return True, "merged"
+            if data.get("state") == "CLOSED":
+                return False, "PR was closed"
+            for check in data.get("statusCheckRollup") or []:
+                if check.get("conclusion") in ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"):
+                    return False, f"required check failed: {check.get('name') or check.get('context')}"
+        time.sleep(15)
+    return False, f"not merged after {seconds}s"
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-m", "--message", help="commit subject, e.g. 'ingest(paper): karpathy-2026-llm-wiki'")
+    ap.add_argument("--agent")
+    ap.add_argument("--invoked-by", help="person slug of the human who invoked the agent (R18)")
+    ap.add_argument("--disposition", choices=("New", "Update", "Disputed", "No material"))
+    ap.add_argument("--source")
+    ap.add_argument("--note")
+    ap.add_argument("--overrides", action="append", default=[], help="Overrides-human: source page (/wiki/…)")
+    ap.add_argument("--upstream", default="origin/main")
+    ap.add_argument("--no-pr", action="store_true", help="push straight to main (fast-forward) instead of a PR")
+    ap.add_argument("--wait", type=int, default=900, help="seconds to wait for the PR to merge (0 = don't wait)")
+    ap.add_argument("--cleanup", action="store_true", help="remove the worktree after success")
+    ap.add_argument("--check", action="store_true", help="preconditions only")
+    ap.add_argument("--base")
+    ap.add_argument("--head")
+    ap.add_argument("--root", type=Path)
+    args = ap.parse_args(argv)
+    root = (args.root or repo_root()).resolve()
+
+    try:
+        upstream = upstream_ref(root, args.upstream)
+    except GitError as exc:
+        log(str(exc))
+        return 3
+
+    # -- check-only mode (GitHub check) --
+    if args.check:
+        if not args.base:
+            ap.error("--check needs --base")
+        head = args.head or "HEAD"
+        changes = changed_files(args.base, head, root)
+        problems = precondition_violations(root, args.base, upstream, changes)
+        for p in problems:
+            print(f"precondition: {p}")
+        print(f"commit-op --check: {len(problems)} violation(s)")
+        return 1 if problems else 0
+
+    # -- validate inputs --
+    agents = load_agents(root)
+    if not args.agent or args.agent not in agents:
+        log(f"--agent must be one of: {', '.join(agents) or '(agents.txt missing)'}")
+        return 3
+    if not args.invoked_by or not SLUG_RE.match(args.invoked_by):
+        log("--invoked-by must be a person slug (first-last)")
+        return 3
+    if not args.message or not SUBJECT_RE.match(args.message):
+        log("-m must look like 'ingest(<channel>): <id>' or 'compile|edit|lint|query|index|schema: <title>'")
+        return 3
+    branch = git(["rev-parse", "--abbrev-ref", "HEAD"], root).strip()
+    if branch in ("main", "HEAD"):
+        log("run inside an operation worktree (tools/start-op), not on main")
+        return 3
+    base = git(["merge-base", "HEAD", upstream], root).strip()
+    if git(["rev-parse", "HEAD"], root).strip() != base:
+        log("the operation branch already has commits; one operation is one commit (start over)")
+        return 3
+
+    # -- 1. indexes --
+    subprocess.run([sys.executable, str(TOOLS / "index"), "--root", str(root), "--quiet"], check=True)
+
+    # -- 2. lint --
+    if not run_lint(root, base, args.agent, args.overrides):
+        log("lint reported errors; fix them or redo the operation")
+        return 1
+
+    changes = [c for c in worktree_changes(base, root) if not is_index(c[1])]
+    if not changes:
+        log("nothing to commit")
+        return 3
+
+    # -- 3. preconditions --
+    try:
+        upstream = upstream_ref(root, args.upstream)  # fetch again, just before committing
+    except GitError as exc:
+        log(str(exc))
+        return 3
+    problems = precondition_violations(root, base, upstream, changes)
+    if problems:
+        for p in problems:
+            log(f"precondition: {p}")
+        return 1
+
+    # -- 4. commit, rebase, push --
+    revert_index_files(root, base)
+    message = build_message(args, changes)
+    env = {
+        "GIT_AUTHOR_NAME": args.agent,
+        "GIT_AUTHOR_EMAIL": agents[args.agent],
+    }
+    if not git(["config", "user.email"], root, check=False).strip():
+        env["GIT_COMMITTER_NAME"] = args.agent
+        env["GIT_COMMITTER_EMAIL"] = agents[args.agent]
+    git(["add", "-A"], root)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+        fh.write(message)
+        msg_path = fh.name
+    try:
+        git(["commit", "--quiet", "-F", msg_path], root, env=env)
+    finally:
+        os.unlink(msg_path)
+    if not git_ok(["rebase", "--quiet", upstream], root):
+        git(["rebase", "--abort"], root, check=False)
+        log("rebase conflict; discard the worktree and redo the operation")
+        return 1
+
+    has_remote = "/" in upstream
+    if not has_remote:
+        main_wt = Path(git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root).strip()).parent
+        if not git_ok(["merge", "--ff-only", "--quiet", branch], main_wt):
+            log("could not fast-forward local main; redo the operation")
+            return 1
+        log(f"committed to local main: {git(['rev-parse', '--short', 'HEAD'], root).strip()}")
+    elif args.no_pr:
+        if not git_ok(["push", "--quiet", "origin", f"HEAD:refs/heads/main"], root):
+            log("push to main was rejected (not a fast-forward); redo the operation")
+            return 1
+        log(f"pushed to main: {git(['rev-parse', '--short', 'HEAD'], root).strip()}")
+    else:
+        git(["push", "--quiet", "-u", "origin", f"HEAD:refs/heads/{branch}"], root)
+        body = "\n".join(message.splitlines()[2:])
+        try:
+            pr_url = gh(["pr", "create", "--base", "main", "--head", branch, "--title", args.message, "--body", body], root).stdout.strip()
+            gh(["pr", "merge", "--auto", "--rebase", pr_url], root)
+        except GitError as exc:
+            log(str(exc))
+            return 2
+        log(f"opened {pr_url} with auto-merge")
+        if args.wait > 0:
+            ok, why = wait_for_merge(root, pr_url, args.wait)
+            if not ok:
+                log(f"PR not merged: {why}; closing it. Redo the operation.")
+                gh(["pr", "close", pr_url, "--delete-branch"], root, check=False)
+                return 2
+            log("merged")
+
+    if args.cleanup:
+        main_root = Path(git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root).strip()).parent
+        subprocess.run([sys.executable, str(TOOLS / "start-op"), "--discard", str(root), "--root", str(main_root)], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except GitError as exc:
+        log(str(exc))
+        sys.exit(3)

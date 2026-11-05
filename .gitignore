@@ -1,0 +1,11 @@
+# Operation worktrees created by tools/start-op (03 § 2).
+.worktrees/
+# Derived search index and tool caches; all rebuildable from the repo.
+.qmd/
+.smart-env/
+.obsidian/workspace*.json
+__pycache__/
+*.pyc
+.pytest_cache/
+# Staging folders used during ingest fetches.
+.staging/

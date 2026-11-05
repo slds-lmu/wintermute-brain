@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+"""Mechanical lint for the brain (03 § 5.1). No LLM.
+
+Context: runs inside tools/commit-op before every agent commit, as an
+optional pre-commit hook for humans, and as the required GitHub check on
+every PR and push to main. Three authority levels (L2): safe fixes
+(applied only with --fix), mechanical reports, and nothing else; the LLM
+lint (03 § 5.2) is a separate, by-hand operation.
+
+Checks and levels
+  frontmatter    type/title/description/tags valid, type matches folder   error
+  slug           kebab-case, unique across the repo                        error
+  link-format    `wiki/…` or `raw/…` without leading slash                 fixed with --fix, else warn
+  link-relative  any other non-root-absolute internal link                 error
+  link-broken    root-absolute link whose target does not exist            error
+  raw-immutable  a file under raw/ modified or deleted since --base        error
+  secrets        gitleaks (if installed) or built-in patterns              error
+  index          index files out of date (--check-index)                   fixed with --fix, else warn
+  orphan         page with no inbound link from another page               warn
+  locked         agent changed a page that was locked at --base (--agent)  error
+  human-line     agent changed a human-authored line without an            error
+                 --overrides source newer than that line (--agent)
+  injection      newly added raw text contains prompt-injection patterns   warn
+  stale          person/grant/project pages untouched for 6 months         warn
+  disputed       open `Status: Disputed` blocks                            info
+
+Usage
+  tools/lint [--fix] [--scope all|changed] [--base REV [--head REV]]
+             [--agent NAME] [--overrides /wiki/…/x.md ...] [--check-index]
+             [--format text|json] [--root DIR]
+
+Exit code 1 if any error-level finding remains, else 0.
+"""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brainlib import (  # noqa: E402
+    DESCRIPTION_MAX, RAW_TEXT_SUFFIXES, REQUIRED_EXTRA, SLUG_RE, STATUSES, TYPES,
+    Finding, Page, agent_emails, changed_files, extract_links, first_commit_time,
+    is_index_file, iter_pages, last_commit_time, load_page, normalise_links,
+    ref_exists, repo_root, show_file, split_frontmatter, blame_authors,
+    worktree_changes,
+)
+
+STALE_DAYS = 183  # 01 § 5.1: ~6 months
+DISPUTED_RE = re.compile(r"^>\s*\*\*Status:\s*Disputed\*\*", re.IGNORECASE)
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Reused from wintermute slds-setup-memory (proposal R4), plus common token shapes.
+SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY-----"),
+    re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+]{16,}"),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
+    re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{20,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+]
+INJECTION_PATTERNS = [
+    re.compile(r"(?i)\b(ignore|override|bypass|disregard)\b.{0,40}\b(previous|prior|above|system|developer)\b.{0,40}\b(instruction|prompt|rule)s?\b"),
+    re.compile(r"(?i)\b(reveal|print|exfiltrate|leak|dump)\b.{0,40}\b(system|developer)\b.{0,40}\b(prompt|instruction)s?\b"),
+    re.compile(r"(?i)\byou are (now|an?) (ai|assistant|agent|model)\b"),
+    re.compile(r"(?i)\b(assistant|agent|claude|ai)\b[^.\n]{0,60}\b(must|should|shall)\b[^.\n]{0,60}\b(run|execute|delete|send|upload|commit)\b"),
+    re.compile(r"(?i)<\s*/?\s*(system|instructions?|assistant)\s*>"),
+]
+INVISIBLE_CHARS = set(range(0x200B, 0x2010)) | set(range(0x202A, 0x2030)) | set(range(0x2060, 0x2070)) | {0xFEFF}
+
+
+class Linter:
+    def __init__(self, root: Path, args: argparse.Namespace):
+        self.root = root
+        self.args = args
+        self.findings: list[Finding] = []
+        self.pages: list[Page] = iter_pages(root)
+        self.by_rel = {p.rel: p for p in self.pages}
+        self.changes: list[tuple[str, str]] | None = None
+        if args.base:
+            if args.head:
+                self.changes = changed_files(args.base, args.head, root)
+            else:
+                self.changes = worktree_changes(args.base, root)
+        self.scope_rels: set[str] | None = None
+        if args.scope == "changed":
+            self.scope_rels = {rel for _, rel in (self.changes or [])}
+        if args.paths:
+            self.scope_rels = {Path(p).resolve().relative_to(root).as_posix() for p in args.paths}
+
+    # -- helpers --
+    def add(self, level: str, rule: str, path: str, message: str, line: int | None = None):
+        self.findings.append(Finding(level, rule, path, message, line))
+
+    def in_scope(self, rel: str) -> bool:
+        return self.scope_rels is None or rel in self.scope_rels
+
+    def scoped_pages(self) -> list[Page]:
+        pages = [p for p in self.pages if self.in_scope(p.rel)]
+        # Pages in scope that are not yet loaded (new untracked files outside wiki/<type>/).
+        return pages
+
+    # -- checks --
+    def check_layout(self):
+        """Pages live only in wiki/<type>/; nothing else under wiki/."""
+        wiki = self.root / "wiki"
+        if not wiki.is_dir():
+            return
+        for p in wiki.rglob("*.md"):
+            rel = p.relative_to(self.root).as_posix()
+            if not self.in_scope(rel):
+                continue
+            parts = rel.split("/")
+            if len(parts) != 3:
+                self.add("error", "layout", rel, "pages live in wiki/<type>/<slug>.md, one level deep")
+            elif parts[1] not in TYPES:
+                self.add("error", "layout", rel, f"unknown type folder {parts[1]!r}; types: {', '.join(TYPES)}")
+
+    def check_frontmatter(self):
+        slugs: dict[str, list[str]] = {}
+        for p in self.pages:
+            slugs.setdefault(p.slug, []).append(p.rel)
+        for p in self.scoped_pages():
+            if p.type_dir not in TYPES:
+                continue
+            if not SLUG_RE.match(p.slug):
+                self.add("error", "slug", p.rel, "slug must be lowercase kebab-case ASCII")
+            if len(slugs.get(p.slug, [])) > 1:
+                others = [r for r in slugs[p.slug] if r != p.rel]
+                self.add("error", "slug", p.rel, f"slug is not unique across the repo: also {', '.join(others)}")
+            if p.frontmatter is None:
+                self.add("error", "frontmatter", p.rel, p.error or "missing frontmatter")
+                continue
+            fm = p.frontmatter
+            t = fm.get("type")
+            if t not in TYPES:
+                self.add("error", "frontmatter", p.rel, f"type must be one of {', '.join(TYPES)}; got {t!r}")
+            elif t != p.type_dir:
+                self.add("error", "frontmatter", p.rel, f"type {t!r} does not match folder wiki/{p.type_dir}/")
+            title = fm.get("title")
+            if not isinstance(title, str) or not title.strip():
+                self.add("error", "frontmatter", p.rel, "title is required (non-empty string)")
+            desc = fm.get("description")
+            if not isinstance(desc, str) or not desc.strip():
+                self.add("error", "frontmatter", p.rel, "description is required (one line, it becomes the index line)")
+            else:
+                if "\n" in desc.strip():
+                    self.add("error", "frontmatter", p.rel, "description must be a single line")
+                if len(desc.strip()) > DESCRIPTION_MAX:
+                    self.add("error", "frontmatter", p.rel, f"description is {len(desc.strip())} chars; max {DESCRIPTION_MAX}")
+            for key in ("tags", "aliases"):
+                if key in fm and (not isinstance(fm[key], list) or not all(isinstance(x, str) for x in fm[key])):
+                    self.add("error", "frontmatter", p.rel, f"{key} must be a list of strings")
+            if "status" in fm and fm["status"] not in STATUSES:
+                self.add("error", "frontmatter", p.rel, f"status must be one of {', '.join(STATUSES)}")
+            if "locked" in fm and not isinstance(fm["locked"], bool):
+                self.add("error", "frontmatter", p.rel, "locked must be true or false")
+            for key in REQUIRED_EXTRA.get(t, ()):
+                if key not in fm or fm[key] in (None, "", []):
+                    self.add("error", "frontmatter", p.rel, f"{t} pages need `{key}`")
+            if t == "meeting" and "date" in fm and not DATE_RE.match(str(fm["date"])):
+                self.add("error", "frontmatter", p.rel, "date must be YYYY-MM-DD")
+            if t == "paper" and "authors" in fm and not isinstance(fm["authors"], list):
+                self.add("error", "frontmatter", p.rel, "authors must be a list (First Last)")
+
+    def check_links(self):
+        fixed_total = 0
+        for p in self.scoped_pages():
+            if self.args.fix:
+                new_text, n = normalise_links(p.text)
+                if n:
+                    p.path.write_text(new_text, encoding="utf-8")
+                    p.text = new_text
+                    _, p.body, _ = split_frontmatter(new_text)
+                    fixed_total += n
+                    self.add("fixed", "link-format", p.rel, f"rewrote {n} link(s) to the root-absolute form")
+            for link in extract_links(p.text):
+                if link.kind == "fixable":
+                    self.add("warn", "link-format", p.rel, f"link `{link.target}` should start with `/` (lint --fix rewrites it)", link.line_no)
+                elif link.kind == "relative":
+                    self.add("error", "link-relative", p.rel, f"internal links must be root-absolute (/wiki/… or /raw/…): `{link.target}`", link.line_no)
+                elif link.kind == "internal":
+                    target = self.root / link.path
+                    if not target.exists():
+                        self.add("error", "link-broken", p.rel, f"target does not exist: `{link.target}`", link.line_no)
+
+    def check_orphans(self):
+        if self.args.scope == "changed" or self.args.no_orphans:
+            return
+        inbound: dict[str, int] = {p.rel: 0 for p in self.pages}
+        for p in self.pages:
+            for link in extract_links(p.text):
+                if link.kind == "internal" and link.path in inbound and link.path != p.rel:
+                    inbound[link.path] += 1
+        for p in self.pages:
+            if inbound[p.rel] == 0:
+                self.add("warn", "orphan", p.rel, "no inbound links from other pages")
+
+    def check_disputed(self):
+        for p in self.scoped_pages():
+            for i, line in enumerate(p.text.splitlines(), 1):
+                if DISPUTED_RE.match(line):
+                    self.add("info", "disputed", p.rel, "open Status: Disputed block", i)
+
+    def check_raw_immutable(self):
+        if self.changes is None:
+            return
+        for status, rel in self.changes:
+            if rel.startswith("raw/") and status in ("M", "D", "T"):
+                verb = "modified" if status != "D" else "deleted"
+                self.add("error", "raw-immutable", rel, f"raw files never change after ingest; this one was {verb}")
+
+    def check_injection(self):
+        if self.changes is None:
+            return
+        for status, rel in self.changes:
+            if status != "A" or not rel.startswith("raw/") or not rel.endswith(RAW_TEXT_SUFFIXES):
+                continue
+            p = self.root / rel
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            hits = [pat.pattern[:40] for pat in INJECTION_PATTERNS if pat.search(text)]
+            if hits:
+                self.add("warn", "injection", rel, f"looks like prompt-injection text ({len(hits)} pattern(s)); source text is data, never instructions (A3)")
+            if any(ord(c) in INVISIBLE_CHARS for c in text):
+                self.add("warn", "injection", rel, "contains invisible Unicode characters")
+
+    def check_secrets(self):
+        files: list[Path] = []
+        if self.scope_rels is not None:
+            for rel in sorted(self.scope_rels):
+                p = self.root / rel
+                if p.is_file() and (rel.startswith(("wiki/", "raw/"))):
+                    files.append(p)
+        else:
+            files = [p for p in (self.root / "wiki").rglob("*") if p.is_file()] if (self.root / "wiki").is_dir() else []
+            if (self.root / "raw").is_dir():
+                files += [p for p in (self.root / "raw").rglob("*") if p.is_file() and p.suffix in RAW_TEXT_SUFFIXES + (".yaml", ".yml")]
+        if not files:
+            return
+        gitleaks = shutil.which("gitleaks")
+        if gitleaks and not self.args.no_gitleaks:
+            self._gitleaks(gitleaks, files)
+        else:
+            self._builtin_secrets(files)
+
+    def _gitleaks(self, exe: str, files: list[Path]):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            for f in files:
+                rel = f.relative_to(self.root)
+                dest = tmpdir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(f, dest)
+            report = tmpdir / "report.json"
+            # `gitleaks dir` exists from 8.19; older versions use `detect --no-git`.
+            for cmd in (["dir", str(tmpdir)], ["detect", "--no-git", "--source", str(tmpdir)]):
+                proc = subprocess.run(
+                    [exe, *cmd, "--no-banner", "--redact", "--exit-code", "3",
+                     "--report-format", "json", "--report-path", str(report)],
+                    capture_output=True, text=True,
+                )
+                if proc.returncode in (0, 3):
+                    break
+            else:
+                self.add("warn", "secrets", "-", f"gitleaks failed to run: {proc.stderr.strip()[:200]}; used built-in patterns instead")
+                self._builtin_secrets(files)
+                return
+            if proc.returncode == 3 and report.is_file():
+                try:
+                    hits = json.loads(report.read_text())
+                except json.JSONDecodeError:
+                    hits = []
+                for h in hits:
+                    rel = Path(h.get("File", "")).resolve()
+                    try:
+                        rel = rel.relative_to(tmpdir.resolve()).as_posix()
+                    except ValueError:
+                        rel = str(rel)
+                    self.add("error", "secrets", rel, f"gitleaks: {h.get('RuleID')} (redacted)", h.get("StartLine"))
+
+    def _builtin_secrets(self, files: list[Path]):
+        for f in files:
+            if f.suffix.lower() in (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".zip"):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for i, line in enumerate(text.splitlines(), 1):
+                for pat in SECRET_PATTERNS:
+                    if pat.search(line):
+                        self.add("error", "secrets", f.relative_to(self.root).as_posix(), "looks like a secret or credential (built-in pattern)", i)
+                        break
+
+    def check_index(self):
+        if not self.args.check_index:
+            return
+        # tools/index has no .py suffix, so load it by path.
+        from importlib.machinery import SourceFileLoader
+        mod = SourceFileLoader("brain_index", str(Path(__file__).resolve().parent / "index")).load_module()
+        changed, stale = mod.plan(self.root)
+        if not changed and not stale:
+            return
+        if self.args.fix:
+            mod.main(["--root", str(self.root), "--quiet"])
+            for rel in list(changed) + stale:
+                self.add("fixed", "index", rel, "regenerated")
+        else:
+            for rel in list(changed) + stale:
+                self.add("warn", "index", rel, "index file out of date (tools/index regenerates it)")
+
+    def check_stale(self):
+        if self.args.scope == "changed" or self.args.no_stale:
+            return
+        cutoff = time.time() - STALE_DAYS * 86400
+        for p in self.pages:
+            fm = p.frontmatter or {}
+            tags = fm.get("tags") if isinstance(fm.get("tags"), list) else []
+            if p.type_dir in ("person", "grant") or "project" in tags:
+                t = last_commit_time(p.rel, self.root)
+                if t and t < cutoff:
+                    self.add("warn", "stale", p.rel, f"untouched for {int((time.time() - t) // 86400)} days; needs refresh")
+
+    def check_agent_rules(self):
+        """01 § 5.3: locks and protected human lines, agent commits only."""
+        if not self.args.agent or self.changes is None:
+            return
+        base = self.args.base
+        agents = agent_emails(self.root)
+        overrides = [o.lstrip("/") for o in (self.args.overrides or [])]
+        override_times: dict[str, int] = {}
+        for o in overrides:
+            if not (self.root / o).is_file() and show_file(self.args.head or "HEAD", o, self.root) is None:
+                self.add("error", "human-line", o, "Overrides-human names a page that does not exist")
+                continue
+            t = first_commit_time(o, self.root, self.args.head or "HEAD")
+            override_times[o] = t or int(time.time())
+        for status, rel in self.changes:
+            if not rel.startswith("wiki/") or status not in ("M", "D"):
+                continue
+            old = show_file(base, rel, self.root)
+            if old is None:
+                continue
+            fm, _, _ = split_frontmatter(old)
+            if fm and fm.get("locked") is True:
+                self.add("error", "locked", rel, f"page was locked at {base[:10]}; agents never edit locked pages")
+                continue
+            if status == "D":
+                new_lines: list[str] = []
+            elif self.args.head:
+                new_lines = (show_file(self.args.head, rel, self.root) or "").splitlines()
+            else:
+                new_lines = (self.root / rel).read_text(encoding="utf-8").splitlines()
+            old_lines = old.splitlines()
+            removed: list[int] = []  # 0-based indices into old_lines
+            sm = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+            for tag, i1, i2, _j1, _j2 in sm.get_opcodes():
+                if tag in ("replace", "delete"):
+                    removed.extend(range(i1, i2))
+            if not removed:
+                continue
+            try:
+                blame = blame_authors(base, rel, self.root)
+            except Exception as exc:  # noqa: BLE001
+                self.add("error", "human-line", rel, f"cannot blame: {exc}")
+                continue
+            human = [(i, blame[i]) for i in removed if i < len(blame) and blame[i][0] not in agents]
+            if not human:
+                continue
+            newest_override = max(override_times.values(), default=None)
+            uncovered = [i for i, (_, when) in human if newest_override is None or when >= newest_override]
+            if uncovered:
+                lines = ", ".join(str(i + 1) for i in uncovered[:10])
+                why = "no Overrides-human source given" if newest_override is None else "the Overrides-human source is not newer than the line"
+                self.add("error", "human-line", rel, f"changed or deleted human-written line(s) {lines}: {why}")
+
+    def run(self) -> list[Finding]:
+        self.check_layout()
+        self.check_frontmatter()
+        self.check_links()
+        self.check_raw_immutable()
+        self.check_secrets()
+        self.check_index()
+        self.check_orphans()
+        self.check_agent_rules()
+        self.check_injection()
+        self.check_stale()
+        self.check_disputed()
+        return self.findings
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("paths", nargs="*", help="limit page checks to these files")
+    ap.add_argument("--fix", action="store_true", help="apply safe fixes (link format, indexes)")
+    ap.add_argument("--scope", choices=("all", "changed"), default="all")
+    ap.add_argument("--base", help="git revision to diff against (enables raw/lock/human-line/injection checks)")
+    ap.add_argument("--head", help="compare --base to this revision instead of the working tree")
+    ap.add_argument("--agent", help="treat the change as an agent commit by this agent (agents.txt)")
+    ap.add_argument("--overrides", action="append", help="Overrides-human source page(s), repo-absolute")
+    ap.add_argument("--check-index", action="store_true")
+    ap.add_argument("--no-stale", action="store_true")
+    ap.add_argument("--no-orphans", action="store_true")
+    ap.add_argument("--no-gitleaks", action="store_true", help="use built-in secret patterns even if gitleaks is installed")
+    ap.add_argument("--format", choices=("text", "json"), default="text")
+    ap.add_argument("--root", type=Path)
+    args = ap.parse_args(argv)
+    root = (args.root or repo_root()).resolve()
+    if args.base and not ref_exists(args.base, root):
+        print(f"error: --base {args.base} is not a git revision", file=sys.stderr)
+        return 2
+    findings = Linter(root, args).run()
+    order = {"error": 0, "fixed": 1, "warn": 2, "info": 3}
+    findings.sort(key=lambda f: (order.get(f.level, 9), f.path, f.line or 0))
+    if args.format == "json":
+        print(json.dumps([f.__dict__ for f in findings], indent=1))
+    else:
+        for f in findings:
+            print(f)
+        counts = {lvl: sum(1 for f in findings if f.level == lvl) for lvl in order}
+        print(f"lint: {counts['error']} error(s), {counts['warn']} warning(s), {counts['fixed']} fixed, {counts['info']} info")
+    return 1 if any(f.level == "error" for f in findings) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

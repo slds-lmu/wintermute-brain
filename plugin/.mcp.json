@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brain-search": {
+      "type": "http",
+      "url": "${BRAIN_QMD_URL:-http://localhost:8181/mcp}",
+      "headers": {
+        "Authorization": "Bearer ${BRAIN_GITHUB_TOKEN:-}"
+      }
+    }
+  }
+}
