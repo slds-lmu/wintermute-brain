@@ -1,0 +1,10 @@
+id: src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f
+channel: session
+title: "Build vs. reuse settled: fork Astro-Han, drop the spike, keep Disputed"
+repo: git@github.com:slds-lmu/wintermute-brain.git
+commit: ee2c599
+session: 98411f70-b745-49c2-8ff7-30b7e28b18a0
+messages: [1, 121]
+person: bernd-bischl
+retrieved: 2026-11-05
+files: [digest.md]
