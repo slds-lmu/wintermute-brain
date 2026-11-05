@@ -40,7 +40,20 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
+def _member_config() -> dict:
+    """The member's settings file (06 § 2.1) takes precedence over the
+    environment: shell startup files (e.g. ~/.zshenv) can silently
+    override variables that `brain` sets (user test N22)."""
+    path = Path(os.environ.get("BRAIN_CONFIG", "~/.config/brain/config.toml")).expanduser()
+    try:
+        import tomllib
+        return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except Exception:  # noqa: BLE001 - a broken config must not break the hook
+        return {}
+
+
+CFG = _member_config()
+REPO = CFG.get("repo") or os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
 MODEL = os.environ.get("BRAIN_DIGEST_MODEL", "haiku")
 TURNS = int(os.environ.get("BRAIN_DIGEST_TURNS", "20"))
 MINUTES = int(os.environ.get("BRAIN_DIGEST_MINUTES", "30"))
@@ -245,7 +258,10 @@ def captured(cwd: str) -> bool:
     the member's config, 06 § 2.1), or below them, are captured. Without
     the list nothing is captured (user test N6: with --plugin-dir every
     session was)."""
-    listed = [p for p in os.environ.get("BRAIN_CAPTURE", "").split(os.pathsep) if p]
+    if "capture" in CFG:
+        listed = [str(p) for p in CFG.get("capture") or []]
+    else:
+        listed = [p for p in os.environ.get("BRAIN_CAPTURE", "").split(os.pathsep) if p]
     try:
         here = Path(cwd).resolve()
     except OSError:
@@ -295,7 +311,7 @@ def hook(event: str) -> None:
 
 
 def person_slug() -> str:
-    env = os.environ.get("BRAIN_PERSON")
+    env = CFG.get("person") or os.environ.get("BRAIN_PERSON")
     if env:
         return env
     name = sh(["git", "config", "user.name"]).stdout.strip() or os.environ.get("USER", "unknown")

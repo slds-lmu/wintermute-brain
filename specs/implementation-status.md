@@ -364,7 +364,6 @@ ingest. Findings (open unless marked):
   one sentence; § 3 and § 6 still described the old behaviour ("where
   the plugin is enabled"), and nothing said how to add a project or how
   to tell whether a session is captured.
-
 - **N20, fixed:** the ask agent did not find the clone: `env` was denied
   by the user's permissions and the skill's default folder
   (`~/wintermute-brain-content-slds`) did not match `setup-brain`'s
@@ -376,3 +375,10 @@ ingest. Findings (open unless marked):
   listed, assistant contributions marked, and the difference between the
   raw digest and the corrected wiki page explained. N12 (no search
   address) still open.
+- **N22, fixed:** in the brain session `BRAIN_DIR` had the old value:
+  `~/.zshenv` still exported the test-1 settings, and Claude Code's
+  shells read it after `brain` had set the environment. The settings
+  file is now authoritative: the session hooks read it directly, and the
+  skill gets its settings from `brain --settings`; environment variables
+  are only a fallback. (The member removes the old lines from
+  `~/.zshenv`.)

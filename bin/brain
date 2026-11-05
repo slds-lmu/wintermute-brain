@@ -8,6 +8,7 @@ arguments are passed on to Claude Code, e.g. `brain -p "…"`.
 
     brain            start Claude Code with the brain
     brain --check    check the setup without starting Claude Code
+    brain --settings print the brain settings (from the config file, no token)
 """
 
 from __future__ import annotations
@@ -58,6 +59,12 @@ def main(argv: list[str]) -> int:
     code = expand(cfg["code_dir"])
     if argv[:1] == ["--check"]:
         return check(cfg, env)
+    if argv[:1] == ["--settings"]:
+        # Read by the skill instead of environment variables, which shell
+        # startup files can override (user test N22). Never prints the token.
+        for key in ("BRAIN_DIR", "BRAIN_REPO", "BRAIN_PERSON", "BRAIN_QMD_URL", "BRAIN_CAPTURE"):
+            print(f"{key}={env.get(key, '')}")
+        return 0
     # Latest code and current content (06 § 2.1); a failed update is not fatal.
     for what, repo in (("code", code), ("brain content", Path(env["BRAIN_DIR"]))):
         r = subprocess.run(["git", "-C", str(repo), "pull", "--quiet", "--ff-only"],

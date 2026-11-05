@@ -29,12 +29,13 @@ history is the log (`$T/log`).
 | your person slug (`first-last`) | `BRAIN_PERSON` | from `git config user.name` |
 | search server (qmd MCP) | `BRAIN_QMD_URL` | `http://localhost:8181/mcp` |
 
-The `brain` command sets these from the member's settings
-(`~/.config/brain/config.toml`) and updates the clone at startup. Read a
-single setting with `echo "$BRAIN_DIR"` (never dump the whole environment:
-it holds the token). If `BRAIN_DIR` is unset or missing, the session was
-not started with `brain`: tell the user to run `setup-brain` once and
-start with `brain`, and stop.
+**Get the settings first** with `python3 "$T/../../bin/brain" --settings`.
+It prints them from the member's settings file
+(`~/.config/brain/config.toml`), which is authoritative; environment
+variables can be stale (shell startup files may override them). Never dump
+the whole environment: it holds the token. If the command fails or the
+folder in `BRAIN_DIR` does not exist, the member has not run `setup-brain`:
+tell them to run it once and to start work with `brain`, and stop.
 
 **The tools ship with this plugin** (code and content are separate repos,
 01 § 1). Before running any of them, set `T` to the plugin's `tools/` folder:
