@@ -148,6 +148,23 @@ The content repo's README has the exact commands for that brain.
 A brain is plain Markdown in git, so any viewer works: GitHub in the
 browser, Obsidian (link settings ship with the repo), or an editor.
 
+**Obsidian.** Obsidian is optional, but works well as a reader:
+
+- Open your clone of the content repo as a vault ("Open folder as
+  vault"). The repo ships the two link settings it needs (Markdown links
+  instead of wikilinks, absolute paths), so nothing has to be configured.
+- **Backlinks** show where a page is cited; on a source's summary page
+  they list every page that relies on that source.
+- **Graph view** shows how pages connect and makes isolated pages
+  visible.
+- **Search** and the file explorer (one folder per page type) work as
+  usual.
+- Keep the vault current with `git pull`; the brain changes several
+  times a day.
+- If you edit in Obsidian, your changes reach the brain like any human
+  edit: commit them and open a PR. Write plain Markdown: no wikilinks,
+  embeds or callouts, which other tools cannot read.
+
 **Where to start.** `index.md` at the root links one catalog per page
 type (`wiki/person/index.md`, `wiki/page/index.md`, …), one line per
 page with its description.
