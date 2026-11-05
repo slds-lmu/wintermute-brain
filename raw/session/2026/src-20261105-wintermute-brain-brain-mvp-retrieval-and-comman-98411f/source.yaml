@@ -1,0 +1,10 @@
+id: src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f
+channel: session
+title: "Brain MVP: retrieval and command decisions, no direct pushes to main, token setup"
+repo: git@github.com:slds-lmu/wintermute-brain.git
+commit: ee2c599
+session: 98411f70-b745-49c2-8ff7-30b7e28b18a0
+messages: [421, 552]
+person: bernd-bischl
+retrieved: 2026-11-05
+files: [digest.md]
