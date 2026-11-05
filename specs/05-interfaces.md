@@ -1,6 +1,6 @@
 # 05 — Interfaces
 
-Status: **accepted** (owner, 2026-11-05; implemented, see today.md)
+Status: **accepted** (owner, 2026-11-05; implemented, see `implementation-status.md`)
 Owner: Bernd Bischl
 Last updated: 2026-11-05
 Depends on: `00-requirements.md` R17, `02-ingest.md`, `06-ops.md`

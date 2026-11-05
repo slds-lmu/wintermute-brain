@@ -54,5 +54,6 @@ python3 -m unittest discover -s tools/tests   # fixture wiki + one broken copy p
 
 ## Status
 
-Implementation of the MVP (00 § 7) as of 2026-11-05. Not yet run against
-GitHub or the server; see `today.md` for what was built and what remains.
+Implementation of the MVP (00 § 7) as of 2026-11-05: first live tests on
+GitHub passed; the server is not set up yet. See
+`specs/implementation-status.md` for what was built, tested and remains.

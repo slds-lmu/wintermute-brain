@@ -1,13 +1,12 @@
 # Prior art: synthesis
 
 Status: **draft**
-Last updated: 2026-10-29
+Last updated: 2026-11-05
 Full reports: `specs/research/A–H` (A–E on 2026-10-29: about 1900 lines,
 30+ projects, repos cloned and read, no code executed). Key repos and
 licenses were spot-checked with `gh`, and OKF's SPEC.md was read
 directly. F–H (2026-11-05) assess AnythingLLM, arkon, nashsu/llm_wiki
-and team-wiki products as candidate bases; none qualifies (summary in
-`today.md`). Scale and performance numbers in the reports are
+and team-wiki products as candidate bases; none qualifies (§ 7). Scale and performance numbers in the reports are
 self-reported by their projects unless stated otherwise.
 
 ## 1. Bottom line
@@ -186,3 +185,33 @@ MCP server are candidates for the bot milestone.
 - Star counts of some projects look inflated (A report § 12).
 - GPU: **a group GPU server is available** (owner, 2026-10-29). It can
   host PDF conversion (MinerU/Marker) and the bot's qmd instance.
+
+## 7. Build vs. reuse (owner, 2026-11-05)
+
+**Decision: no existing product as the base; the plan stands** (fork of
+Astro-Han's skill + qmd + plain git/Markdown). Reports F–H.
+
+What the plan reuses: Claude Code as the agent loop, the Astro-Han skill
+(prompts plus one checker), qmd, defuddle, litdownload, gitleaks, OKF
+field names. Our own code is a few hundred lines of scripts.
+
+| Candidate | What it is | Why not as the base | Verdict |
+|---|---|---|---|
+| AnythingLLM (MIT, very active) | chat with your documents (RAG), no wiki | state in SQLite/LanceDB; chunk citations only; roles too coarse for tiers; duplicates qmd | ignore; at most an optional web chat later |
+| arkon | close to our design: compiled pages, revisions, roles, MCP | Postgres only, no git or Markdown export; PolyForm Internal Use license (not open source); one author, inactive; per-claim citations promised but not in the code | borrow ideas |
+| nashsu/llm_wiki (GPL-3.0) | desktop app for one user | every member's app would re-ingest each pulled source; no headless mode; state in `.llm-wiki/`; wikilinks only; ~92k lines | borrow ideas, in our own words (GPL) |
+| Team wikis (Notion, Confluence/Rovo, Glean, Outline, GitBook, Wiki.js, BookStack, Docmost) | humans write, AI answers or drafts | no AI maintains a wiki; only git-backed ones pass "repo is complete", and even Wiki.js 3 drops our OKF fields on web edits | git stays the record; optional viewer later (K16) |
+| Memory frameworks (Mem0, Zep, Basic Memory) | chat memory | not citable pages; Basic Memory is AGPL and writes into every file | ignore |
+
+- **Caveat (H report):** if git ever stops being the record, self-hosted
+  Outline would beat our plan for a human-edited team wiki. Our plan
+  wins because the main writer is the agent, git is the provenance, lint
+  runs on files, and qmd searches `raw/` too.
+- **Real risk:** our custom parts are the unproven ones: concurrent
+  autonomous writers, duplicates, human corrections being overwritten,
+  tiers. The open question is whether a compiled wiki beats plain
+  retrieval over `raw/`.
+- **No spike** (owner): a 15-source test can't show whether the wiki
+  helps; only real use by the group can. The MVP done-criterion (00 § 7)
+  is the first check (`v0-foundation.md`).
+- New ideas from F–H are parked as K1–K16 (`parked.md`).

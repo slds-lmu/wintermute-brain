@@ -1,6 +1,6 @@
 # 02 — Ingest channels
 
-Status: **accepted** (owner, 2026-11-05; implemented, see today.md)
+Status: **accepted** (owner, 2026-11-05; implemented, see `implementation-status.md`)
 Owner: Bernd Bischl
 Last updated: 2026-11-05
 Depends on: `00-requirements.md`, `01-data-model.md`, `03-agent-ops.md`

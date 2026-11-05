@@ -1,6 +1,6 @@
 # 04 — Retrieval
 
-Status: **accepted** (owner, 2026-11-05; implemented, see today.md)
+Status: **accepted** (owner, 2026-11-05; implemented, see `implementation-status.md`)
 Owner: Bernd Bischl
 Last updated: 2026-11-05
 Depends on: `01-data-model.md` § 7, `03-agent-ops.md` § 4, `06-ops.md` § 3

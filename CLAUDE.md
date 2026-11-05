@@ -39,14 +39,17 @@ the schema layer. The full design is in `specs/` (00–06, accepted
 ## Status (2026-11-05)
 
 Specs 00–06 accepted; MVP implemented in this repo (tools, plugin, server,
-CI). Nothing has run against GitHub or the server yet. `today.md` lists
-what was built and what is still open. Parked ideas: `specs/parked.md`.
+CI). First live tests on GitHub passed (two web ingests); the server is
+not set up yet. Built, tested and open: `specs/implementation-status.md`.
+Parked ideas: `specs/parked.md`.
 
 ## Development notes
 
 - Specs first: change a spec before changing behaviour; if implementation
   shows a spec is wrong, fix the spec, then the code.
-- Discussion goes into docs (`specs/…`, `today.md`), not the console.
+- Discussion goes into docs (`specs/…`), not the console. Temporary
+  session notes are allowed but must be folded into proper files and
+  deleted.
 - The owner's laptop rules (manifests, yolobox) are not design constraints
   for the brain. Brain tooling (qmd, defuddle, gitleaks, …) is installed on
   the brain's deployment targets, per `specs/06-ops.md`.
