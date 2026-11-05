@@ -50,18 +50,23 @@ jobs:
             git fetch --quiet origin main
             BASE=$(git merge-base origin/main HEAD)
             HEAD_SHA=$(git rev-parse HEAD)
+            # HEAD is GitHub's test merge commit: its author is whoever opened
+            # the PR and its message has no trailers. The author kind and the
+            # Overrides-human trailer come from the PR's own head commit.
+            META_SHA="${{ github.event.pull_request.head.sha }}"
           else
             BASE="${{ github.event.before }}"
             HEAD_SHA="${{ github.sha }}"
             # First push or forced history: fall back to the parent commit.
             git cat-file -e "$BASE" 2>/dev/null || BASE=$(git rev-parse HEAD~1 2>/dev/null || echo "$HEAD_SHA")
+            META_SHA="$HEAD_SHA"
           fi
-          AUTHOR=$(git log -1 --format=%ae "$HEAD_SHA" | tr 'A-Z' 'a-z')
+          AUTHOR=$(git log -1 --format=%ae "$META_SHA" | tr 'A-Z' 'a-z')
           AGENT=""
           while read -r name email; do
             [ "$email" = "<$AUTHOR>" ] && AGENT="$name"
           done < <(grep -v '^#' agents.txt | sed 's/ *#.*//' | awk 'NF==2')
-          OVERRIDES=$(git log -1 --format=%b "$HEAD_SHA" | sed -n 's/^Overrides-human: *//p' | tr '\n' ' ')
+          OVERRIDES=$(git log -1 --format=%b "$META_SHA" | sed -n 's/^Overrides-human: *//p' | tr '\n' ' ')
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
           echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "agent=$AGENT" >> "$GITHUB_OUTPUT"
