@@ -14,7 +14,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from .access import ChecksThrottled, GitHubUnavailable, RepoAccess
-from .routing import HOP_HEADERS, Call, Router, is_search, without_subscriptions
+from .routing import (
+    HOP_HEADERS,
+    Call,
+    Router,
+    is_discovery,
+    is_search,
+    without_subscriptions,
+)
 from .runtime import CpuQmd, QmdRuntime
 
 MAX_BODY = 1024 * 1024
@@ -124,7 +131,10 @@ def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
                 name: value for name, value in request.headers.items()
                 if name.lower() not in HOP_HEADERS | {"authorization", "origin", "accept-encoding"}
             },
+            discovery=is_discovery(payload),
         )
+        if isinstance(payload, dict) and "text/event-stream" in request.headers.get("accept", ""):
+            call.event_id = payload.get("id")
         if is_search(payload):
             return await app.state.router.search(call, request.is_disconnected)
         return await app.state.router.control(call)

@@ -155,7 +155,9 @@ it is not, a search also starts on the CPU qmd, one search at a time, and
 the first complete answer wins. Both use the same models and settings, so
 a CPU answer has full quality and only takes longer. qmd cannot cancel a
 running search, so abandoning a CPU search kills that process, which
-restarts within a second. An index update waits for the GPU qmd.
+restarts within a second. An index update waits for the GPU qmd. A search
+that takes longer than clients wait for response headers is answered as a
+server-sent event on a response started early.
 
 Members use personal GitHub tokens with read access to the content repo.
 The compile worker uses a separate internal service credential for MCP.
@@ -166,7 +168,6 @@ installation tokens without periodic worker restarts.
 Operational details and validation commands are in server/README.md.
 
 qmd's HTTP server buffers every response until it is complete, so it can
-deliver no notification on an open stream. The gateway therefore asks qmd
-for an empty subscription, which qmd acknowledges and closes immediately.
-Clients learn at connection time that no change notifications will come.
-Search calls hold their GPU admission until completion or disconnect.
+deliver no notification on an open stream. The gateway therefore does not
+advertise change notifications, and clients do not subscribe to them. Search
+calls hold their GPU admission until completion or disconnect.

@@ -11,7 +11,15 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from brain_server.access import ChecksThrottled, GitHubUnavailable
 from brain_server.app import create_app
-from brain_server.routing import Call, Router, is_search, without_subscriptions
+from brain_server.routing import (
+    Call,
+    Router,
+    as_event,
+    is_discovery,
+    is_search,
+    without_list_changed,
+    without_subscriptions,
+)
 
 SEARCH = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "query", "arguments": {"query": "x"}}}
 ANSWER = {"jsonrpc": "2.0", "id": 1, "result": {}}
@@ -353,6 +361,150 @@ def test_calls_without_model_use_fall_back_to_the_gpu_then_give_up():
 ])
 def test_search_classification(payload, expected):
     assert is_search(payload) is expected
+
+
+async def body_of(response):
+    return b"".join([chunk async for chunk in response.body_iterator])
+
+
+def test_quick_search_answers_plainly_even_if_events_are_accepted():
+    async def exercise():
+        async with routed(ready=True) as (router, gpu, cpu, upstreams):
+            answer = call()
+            answer.event_id = 1
+            response = await router.search(answer, never_disconnected)
+            assert response.headers["content-type"] == "application/json"
+            assert json.loads(response.body) == ANSWER
+
+    run(exercise())
+
+
+def test_slow_search_commits_to_events_with_keepalives_and_then_the_answer():
+    async def exercise():
+        async with routed(answer_wait=0.01, keepalive=0.01) as (router, gpu, cpu, upstreams):
+            upstreams.block["cpu"] = asyncio.Event()
+            slow = call()
+            slow.event_id = 7
+            response = await router.search(slow, never_disconnected)
+            assert response.media_type == "text/event-stream"
+            assert "no-transform" in response.headers["cache-control"]
+            chunks = response.body_iterator
+            assert await chunks.__anext__() == b": searching\n\n"
+            assert await chunks.__anext__() == b": searching\n\n"
+            upstreams.block["cpu"].set()
+            rest = b"".join([chunk async for chunk in chunks])
+            event = rest.split(b"event: message\ndata: ")[1]
+            assert rest.endswith(b"\n\n")
+            assert json.loads(event) == ANSWER
+
+    run(exercise())
+
+
+def test_slow_search_without_event_support_keeps_waiting_for_a_plain_answer():
+    async def exercise():
+        async with routed(answer_wait=0.01) as (router, gpu, cpu, upstreams):
+            upstreams.block["cpu"] = asyncio.Event()
+            search = asyncio.create_task(router.search(call(), never_disconnected))
+            await asyncio.sleep(0.05)
+            assert not search.done()
+            upstreams.block["cpu"].set()
+            assert (await search).headers["content-type"] == "application/json"
+
+    run(exercise())
+
+
+def test_deadline_after_committing_to_events_is_a_json_rpc_error():
+    async def exercise():
+        async with routed(available=False, answer_wait=0.01, search_wait=0.05, keepalive=0.01) as (router, gpu, cpu, upstreams):
+            slow = call()
+            slow.event_id = 7
+            response = await router.search(slow, never_disconnected)
+            event = (await body_of(response)).split(b"event: message\ndata: ")[1]
+            message = json.loads(event)
+            assert message["id"] == 7
+            assert message["error"]["message"] == "Search is waiting for a free backend"
+
+    run(exercise())
+
+
+def test_disconnect_from_the_event_stream_kills_the_search():
+    async def exercise():
+        async with routed(answer_wait=0.01, keepalive=0.01) as (router, gpu, cpu, upstreams):
+            upstreams.block["cpu"] = asyncio.Event()
+            slow = call()
+            slow.event_id = 7
+            response = await router.search(slow, never_disconnected)
+            chunks = response.body_iterator
+            await chunks.__anext__()
+            await upstreams.started["cpu"].wait()
+            await chunks.aclose()
+            await asyncio.sleep(0.05)
+            assert cpu.aborts == 1
+            assert not cpu.search_slot.locked()
+
+    run(exercise())
+
+
+def test_events_pass_along_error_answers_and_other_bodies():
+    from fastapi.responses import Response
+
+    rpc_error = {"jsonrpc": "2.0", "id": 3, "error": {"code": -32602, "message": "invalid"}}
+    plain = as_event(Response(json.dumps(rpc_error), media_type="application/json"), 3)
+    assert json.loads(plain.split(b"data: ")[1]) == rpc_error
+    assert b"Search failed" in as_event(Response(b"not json"), 3)
+    stream = b"event: message\ndata: {}\n\n"
+    assert as_event(Response(stream, media_type="text/event-stream"), 3) == stream
+
+
+def test_gateway_offers_events_only_for_a_single_request_accepting_them(gateway):
+    client, seen, gpu, cpu, access = gateway
+    router = client.app.state.router
+    calls = []
+    original = router.search
+
+    async def spy(call, disconnected):
+        calls.append(call.event_id)
+        return await original(call, disconnected)
+
+    router.search = spy
+    both = {**MEMBER, "Accept": "application/json, text/event-stream"}
+    assert client.post("/mcp", json=SEARCH, headers=both).status_code == 200
+    assert client.post("/mcp", json=SEARCH, headers={**MEMBER, "Accept": "application/json"}).status_code == 200
+    assert client.post("/mcp", json=[SEARCH], headers=both).status_code == 200
+    assert calls == [1, None, None]
+
+
+def test_discovery_stops_advertising_change_notifications():
+    assert is_discovery({"method": "server/discover"})
+    assert is_discovery({"method": "initialize"})
+    assert not is_discovery({"method": "tools/list"})
+    assert not is_discovery([{"method": "initialize"}])
+    answer = {"jsonrpc": "2.0", "id": 1, "result": {
+        "capabilities": {"tools": {"listChanged": True}, "resources": {"listChanged": True, "subscribe": True}, "logging": {}},
+        "instructions": "keep",
+    }}
+    assert json.loads(without_list_changed(json.dumps(answer).encode())) == {"jsonrpc": "2.0", "id": 1, "result": {
+        "capabilities": {"tools": {}, "resources": {"subscribe": True}, "logging": {}},
+        "instructions": "keep",
+    }}
+    for other in (b"event: message\ndata: {}\n\n", b"[]", b'{"result": {}}', b'{"result": {"capabilities": 1}}', b'{"result": 1}'):
+        assert without_list_changed(other) == other
+
+
+def test_gateway_rewrites_discovery_answers_only(monkeypatch):
+    monkeypatch.setenv("BRAIN_SEARCH_SERVICE_TOKEN", "internal-service-token")
+    answer = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {"tools": {"listChanged": True}}}}
+
+    def qmd(request):
+        return httpx.Response(200, json=answer)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(qmd))
+    app = create_app(runtime=Gpu(), cpu=Cpu(), access=Access(), qmd_client=client)
+    with TestClient(app) as test_client:
+        found = test_client.post("/mcp", json={"method": "server/discover"}, headers=MEMBER)
+        assert found.json()["result"]["capabilities"] == {"tools": {}}
+        other = test_client.post("/mcp", json={"method": "tools/list"}, headers=MEMBER)
+        assert other.json() == answer
 
 
 def test_listen_filter_is_emptied_and_other_requests_stay_untouched():

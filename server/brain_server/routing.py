@@ -8,10 +8,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 import httpx
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ HOP_HEADERS = {
 }
 # Status for a request whose client has gone; nobody reads the response.
 CLIENT_CLOSED = 499
+STILL_SEARCHING = b": searching\n\n"
 
 
 class BackendFailed(Exception):
@@ -32,6 +33,9 @@ class Call:
     method: str
     body: bytes
     headers: dict[str, str]
+    discovery: bool = False
+    # The JSON-RPC id, when the client also accepts an SSE response.
+    event_id: int | str | None = None
     gpu_admitted: bool = False
 
 
@@ -48,12 +52,52 @@ def is_search(payload: object) -> bool:
     return _is_search(payload)
 
 
-def without_subscriptions(payload: object, body: bytes) -> bytes:
-    """Ask for an empty subscription, which qmd acknowledges and closes at once.
+def is_discovery(payload: object) -> bool:
+    return isinstance(payload, dict) and payload.get("method") in {"server/discover", "initialize"}
 
-    qmd's HTTP server buffers a whole response before sending it, so an open
-    subscription would never deliver its acknowledgement or any notification.
-    Invalid requests stay unchanged for qmd to reject.
+
+def as_event(response: Response, request_id: int | str) -> bytes:
+    """The body of a finished search as the single event of an SSE response."""
+    if response.headers.get("content-type", "").startswith("text/event-stream"):
+        return response.body
+    try:
+        message = json.loads(response.body)
+    except ValueError:
+        message = None
+    if not isinstance(message, dict) or "jsonrpc" not in message:
+        detail = message.get("detail") if isinstance(message, dict) else None
+        message = {
+            "jsonrpc": "2.0", "id": request_id,
+            "error": {"code": -32000, "message": detail or "Search failed"},
+        }
+    return b"event: message\ndata: " + json.dumps(message).encode() + b"\n\n"
+
+
+def without_list_changed(content: bytes) -> bytes:
+    """Stop advertising change notifications, so that clients do not subscribe.
+
+    qmd's HTTP server buffers a whole response before sending it, so it can
+    deliver no notification. Claude Code would otherwise wait 25 seconds for an
+    acknowledgement that never arrives, and reopen a closed stream indefinitely.
+    """
+    try:
+        message = json.loads(content)
+        capabilities = message["result"]["capabilities"]
+    except (ValueError, KeyError, TypeError):
+        return content
+    if not isinstance(capabilities, dict):
+        return content
+    for capability in capabilities.values():
+        if isinstance(capability, dict):
+            capability.pop("listChanged", None)
+    return json.dumps(message).encode()
+
+
+def without_subscriptions(payload: object, body: bytes) -> bytes:
+    """For clients that subscribe anyway: qmd acknowledges an empty filter at once.
+
+    An open subscription would never deliver its acknowledgement, for the reason
+    given above. Invalid requests stay unchanged for qmd to reject.
     """
     if not isinstance(payload, dict) or payload.get("method") != "subscriptions/listen":
         return body
@@ -74,6 +118,9 @@ class Router:
         self.gpu_search_timeout = float(os.environ.get("BRAIN_GPU_SEARCH_TIMEOUT", "180"))
         # Index refreshes close GPU admission for a fraction of a second.
         self.cpu_grace = float(os.environ.get("BRAIN_CPU_GRACE", "1"))
+        # Claude Code gives up on a request without response headers after 60 s.
+        self.answer_wait = float(os.environ.get("BRAIN_ANSWER_WAIT", "20"))
+        self.keepalive = float(os.environ.get("BRAIN_KEEPALIVE", "15"))
         self.tick = 0.25
 
     async def _forward(self, upstream: str, call: Call, timeout: float) -> httpx.Response:
@@ -89,13 +136,14 @@ class Router:
         return response
 
     @staticmethod
-    def _reply(upstream: httpx.Response, backend: str) -> Response:
+    def _reply(upstream: httpx.Response, backend: str, discovery: bool = False) -> Response:
         headers = {
             name: value for name, value in upstream.headers.items()
             if name.lower() not in HOP_HEADERS | {"content-encoding"}
         }
         headers["X-Brain-Backend"] = backend
-        return Response(upstream.content, status_code=upstream.status_code, headers=headers)
+        content = without_list_changed(upstream.content) if discovery else upstream.content
+        return Response(content, status_code=upstream.status_code, headers=headers)
 
     def _unavailable(self, detail: str, retry_after: int) -> JSONResponse:
         return JSONResponse(
@@ -112,12 +160,12 @@ class Router:
                 return self._unavailable("Search backend unavailable", 5)
             try:
                 if self.cpu.available.is_set():
-                    return self._reply(await self._forward(self.cpu.upstream, call, remaining), "cpu")
+                    upstream = await self._forward(self.cpu.upstream, call, remaining)
+                    return self._reply(upstream, "cpu", call.discovery)
                 if self.runtime.ready.is_set():
                     async with self.runtime.admission():
-                        return self._reply(
-                            await self._forward(self.runtime.upstream, call, remaining), "gpu",
-                        )
+                        upstream = await self._forward(self.runtime.upstream, call, remaining)
+                    return self._reply(upstream, "gpu", call.discovery)
             except BackendFailed as error:
                 # The CPU qmd restarts within a second after an aborted search.
                 log.info("Retrying a call without model use: %s", error)
@@ -141,6 +189,40 @@ class Router:
                 raise
 
     async def search(self, call: Call, disconnected: Callable[[], Awaitable[bool]]) -> Response:
+        """Answer plainly if that is quick, otherwise as an SSE event when ready.
+
+        qmd cannot stream, so response headers normally wait for the answer. A
+        search on the CPU can take longer than clients wait for those headers.
+        """
+        race = asyncio.create_task(self._race(call, disconnected))
+        if call.event_id is None:
+            return await race
+        done, _ = await asyncio.wait({race}, timeout=self.answer_wait)
+        if done:
+            return race.result()
+        return StreamingResponse(
+            self._events(race, call.event_id),
+            media_type="text/event-stream",
+            # no-transform: Caddy would otherwise buffer the stream to compress it.
+            headers={"Cache-Control": "no-cache, no-transform"},
+        )
+
+    async def _events(self, race: asyncio.Task, request_id: int | str) -> AsyncIterator[bytes]:
+        try:
+            yield STILL_SEARCHING
+            while True:
+                done, _ = await asyncio.wait({race}, timeout=self.keepalive)
+                if done:
+                    break
+                yield STILL_SEARCHING
+            response = race.result()
+            if response.status_code != CLIENT_CLOSED:
+                yield as_event(response, request_id)
+        finally:
+            # Also reached when the client disconnects from the stream.
+            race.cancel()
+
+    async def _race(self, call: Call, disconnected: Callable[[], Awaitable[bool]]) -> Response:
         """Run a search on the GPU; while it is taken, race the CPU against it."""
         started = time.monotonic()
         deadline = started + self.search_wait

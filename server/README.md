@@ -90,6 +90,7 @@ idle minutes. The image carries its backend, the locked
 | --- | --- |
 | tools/call query | GPU qmd if available, otherwise a race (below) |
 | subscriptions/listen | CPU qmd, with an empty notification filter |
+| server/discover, initialize | CPU qmd, with listChanged removed from the answer |
 | Everything else | CPU qmd; GPU qmd only while the CPU qmd restarts |
 
 Only query uses models: get, multi_get, status, and discovery read SQLite.
@@ -103,6 +104,16 @@ from starting CPU work. Responses are returned only once complete, so the
 first complete response wins and the other attempt is abandoned. The answer
 carries X-Brain-Backend. After BRAIN_SEARCH_WAIT seconds without an answer,
 the client receives 503 with Retry-After. The clone/index fallback applies.
+
+Claude Code abandons a request after 60 seconds without response headers,
+unless MCP_TOOL_TIMEOUT or the server's timeout setting raises that limit, and
+qmd sends none before its answer is complete. A search still running after
+BRAIN_ANSWER_WAIT seconds therefore receives 200 with text/event-stream
+headers, a comment line every BRAIN_KEEPALIVE seconds, and finally the answer
+as one event. At the deadline this stream carries a JSON-RPC error in place of
+the 503. Cache-Control: no-transform keeps Caddy's encode from buffering it.
+A client that does not accept text/event-stream gets a plain response at the
+end. Claude Code 2.1.318 accepted such an answer after 248 seconds.
 
 The CPU qmd runs one search at a time. qmd cannot cancel a search, and one
 keeps its threads after its client has gone. Abandoning a running search,
@@ -138,9 +149,12 @@ still start one thread per vCPU, and a search took 432 seconds on 8 of the 20.
 qmd's HTTP server buffers each response until it is complete, so an open
 subscriptions/listen stream delivers neither its acknowledgement nor any
 notification. Claude Code waits 25 seconds for that acknowledgement while
-connecting. The gateway empties the request's filter, and qmd acknowledges
-and closes the stream at once. Clients therefore receive no list_changed
-notifications, which qmd could not deliver in any case.
+connecting, and reopens a stream that closes, with a tools/list each time. The
+gateway therefore removes listChanged from the capabilities in server/discover
+and initialize answers, and Claude Code no longer subscribes. For a client
+that subscribes anyway, the gateway empties the request's filter, and qmd
+acknowledges and closes the stream at once. qmd's tools do not change while it
+runs, so clients lose nothing.
 
 ## CONFIGURATION
 
@@ -166,7 +180,9 @@ notifications, which qmd could not deliver in any case.
 | BRAIN_GPU_QUIET | 5 seconds |
 | BRAIN_GPU_DRAIN | 30 seconds; wait for active searches before stopping qmd |
 | BRAIN_INDEX_POLL | 60 seconds |
-| BRAIN_SEARCH_WAIT | 280 seconds; below Caddy's 300-second limit |
+| BRAIN_SEARCH_WAIT | 280 seconds; below Caddy's 300-second header limit |
+| BRAIN_ANSWER_WAIT | 20 seconds; switch to an event stream after this time |
+| BRAIN_KEEPALIVE | 15 seconds; comment lines on that stream |
 | BRAIN_GPU_SEARCH_TIMEOUT | 180 seconds |
 | BRAIN_CONTROL_WAIT | 30 seconds; calls that need no model |
 | BRAIN_CPU_GRACE | 1 second; GPU wait before a search also starts on the CPU |
