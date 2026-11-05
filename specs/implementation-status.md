@@ -179,3 +179,14 @@ Problems found and how they were handled:
   `wintermute-brain-content-slds` (fresh start), pinned to code tag
   `v0.1.0` via `.brain-version`. The test content of today stays only in
   this repo's history.
+  **Done 2026-11-05:** PR #32 merged; tags `v0.1.0`, `v0.1.1` (fix:
+  brain-check on a repo's first commit). Content repo set up (schema,
+  thin workflows at v0.1.1, ruleset "main: required check" with required
+  check `check / check`, bypass App + admins, auto-merge on). First
+  ingest into it (SLDS homepage, content PR #1) passed end to end with
+  the tools from `plugin/tools/`; index Action pushed via the App.
+  **Still to do:** the wintermute marketplace entry must point at
+  `slds-lmu/wintermute-brain`, path `plugin` (not important now, owner
+  2026-11-05); open code PRs (closed as outdated; authors may redo them) from before
+  the split (#29 containers, #31 check/digest fixes) need a rebase onto
+  the new layout; members re-point clones and `BRAIN_REPO`.
