@@ -27,6 +27,22 @@ Look at these first when v1 runs.
 | K30 | **PRIORITY, but not now (owner, 2026-11-05).** **Backup outside GitHub.** For now GitHub only, plus branch protection on `main`. Candidate: the server keeps a full mirror (incl. all LFS files) on a disk covered by the university backup; it already pulls every 5 minutes | owner, 2026-11-05 (06-Q8) | 06 |
 | K31 | **Enforce "nobody pushes directly to `main`" for admins.** The ruleset still lets repository admins bypass (direct pushes skip lint and the concurrency precondition). Lenient during the test phase (owner, 2026-11-05). Before wider use: switch the admin bypass to "pull requests only" (escape hatch for a broken check) or remove it | owner, 2026-11-05; live test problem 3 | 03 § 2.1 |
 
+## Reading and local copies (owner discussion, 2026-11-05)
+
+Most people will probably read the brain in Obsidian, which needs a
+local copy of the content repo. Today a clone is needed for Obsidian and
+for writing by hand (ingest, edit, lint); reading on GitHub, asking (once
+the server's search runs) and session capture need none.
+
+| # | Idea | Origin | Affects |
+|---|---|---|---|
+| K33 | **No manual clone for writers.** (a) The plugin keeps a hidden, lightweight copy in a cache folder and updates it before each operation; or (b) writing moves to the server: `/brain-ingest` only sends the request and the server worker writes and opens the PR (members then need only Claude Code and the plugin); or (c) writes via the GitHub API only, with checks on GitHub alone. Discussed: (a) short term, (b) as end state | owner, 2026-11-05 | 03 § 2, 05, 06 § 2 |
+| K34 | **Browser reading on GitHub.** (1) Catalogs are `index.md`, but GitHub renders only `README.md` in a folder view, so folder pages show bare file lists; (2) the content repo's root README is a setup guide, not a "start reading here" page; (3) the root is cluttered with technical files (`.brain-version`, `.claude`, `.github`, `.obsidian`, `agents.txt`, `CLAUDE.md`, `templates/`, `scope.md`); (4) file names are machine slugs, especially `src-…` sources; (5) `wiki/page/` and `wiki/source/` become long flat folders | owner, 2026-11-05 | 01 § 2–3, § 7 |
+| K35 | **Obsidian: titles instead of file names.** The file list and quick switcher show slugs (`src-20261105-…`), not titles; showing titles needs a community plugin (conflicts with tool independence). Partial fix without plugins: better `aliases` | owner, 2026-11-05 | 01 § 3, § 5 |
+| K36 | **Obsidian: hide `raw/` and the catalogs.** `raw/` clutters file list, search and graph; un-downloaded PDFs appear as LFS pointer stubs. Catalog files (`index*.md`) link to every page and turn the graph into a few hubs. Fixable with shipped settings (excluded files in `.obsidian/app.json`) | owner, 2026-11-05 | 01 § 6 |
+| K37 | **Obsidian: staying current.** The brain changes several times a day and Obsidian does not pull; readers see stale content unless they `git pull`. Options: a pull before reading (script, plugin hook), or the Obsidian Git community plugin (auto-pull) as an optional recommendation | owner, 2026-11-05 | 05, 06 § 2 |
+| K38 | **Editing without git skills.** An edit in Obsidian or an editor only reaches the brain after commit and PR. For non-git users: ask an agent instead (`/brain-edit`), or a helper that commits and opens the PR for them | owner, 2026-11-05 | 03 § 2, 05 |
+
 ## From the O3 decision (2026-11-05)
 
 | # | Idea | Origin | Affects |
