@@ -38,15 +38,16 @@ import sys
 import time
 from pathlib import Path
 
-BRAIN_DIR = Path(os.environ.get("BRAIN_DIR", "")).expanduser()
-CODE_DIR = Path(os.environ.get("BRAIN_CODE_DIR", "")).expanduser()
+BRAIN_DIR = Path(os.environ.get("BRAIN_DIR", "/brain/repo")).expanduser()
+CODE_DIR = Path(os.environ.get("BRAIN_CODE_DIR", "/brain/code")).expanduser()
+CODE_REPO = os.environ.get("BRAIN_CODE_REPO", "slds-lmu/wintermute-brain")
 REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
 PLUGIN_DIR = CODE_DIR / "plugin"
 TOOLS = PLUGIN_DIR / "tools"
 MODEL = os.environ.get("BRAIN_MODEL", "sonnet")
 POLL = int(os.environ.get("BRAIN_POLL", "300"))
 MAX_TRIES = int(os.environ.get("BRAIN_MAX_TRIES", "3"))
-QMD = os.environ.get("BRAIN_QMD", "qmd update")
+QMD = os.environ.get("BRAIN_QMD", "")
 AGENT = "brain-agent-compile"
 STATE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "brain-worker" / "backoff.json"
 BACKOFF = 24 * 3600
@@ -92,6 +93,8 @@ def sync_code() -> bool:
 
 def queue() -> list[str]:
     r = sh([sys.executable, str(TOOLS / "check_evidence"), "--queue"], BRAIN_DIR)
+    if r.returncode:
+        raise RuntimeError("compile queue check failed: " + r.stderr.strip()[:300])
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
 
 
@@ -122,8 +125,7 @@ def compile_item(item: str, dry_run: bool) -> bool:
         env = dict(os.environ, BRAIN_DIR=str(BRAIN_DIR), BRAIN_REPO=REPO, BRAIN_TOOLS=str(TOOLS),
                    BRAIN_SESSION_DIGEST="off")
         r = subprocess.run(cmd, cwd=wt, capture_output=True, text=True, env=env, timeout=3600)
-        tail = (r.stdout or r.stderr).strip()[-600:]
-        log(f"agent finished ({r.returncode}): {tail}")
+        log(f"agent finished ({r.returncode})")
         # Success = the summary page exists on main now.
         pull()
         return queue().count(item) == 0
@@ -143,11 +145,16 @@ def reindex() -> None:
 
 
 def cycle(dry_run: bool) -> None:
-    if not pull() or not sync_code():
+    if not pull():
+        return
+    (BRAIN_DIR / ".git" / "brain-ready").write_text(str(time.time()))
+    if not sync_code():
         return
     state = load_state()
     now = time.time()
     for item in queue():
+        if os.environ.get("BRAIN_AUTO_COMPILE", "true").lower() != "true":
+            break
         entry = state.get(item, {"tries": 0, "until": 0})
         if entry.get("until", 0) > now:
             continue
@@ -170,14 +177,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="print the agent command instead of running it")
     args = ap.parse_args(argv)
-    if not BRAIN_DIR.is_dir() or not (BRAIN_DIR / "wiki").is_dir():
-        print("BRAIN_DIR must point at a clone of the content repo", file=sys.stderr)
-        return 2
-    if not CODE_DIR.is_dir() or not (CODE_DIR / ".git").exists():
-        print("BRAIN_CODE_DIR must point at a clone of the code repo", file=sys.stderr)
-        return 2
     while True:
         try:
+            if not (BRAIN_DIR / ".git").exists():
+                BRAIN_DIR.parent.mkdir(parents=True, exist_ok=True)
+                result = sh(["git", "clone", "https://github.com/" + REPO + ".git", str(BRAIN_DIR)])
+                if result.returncode:
+                    raise RuntimeError("initial content clone failed: " + result.stderr.strip()[-300:])
+            if not (CODE_DIR / ".git").exists():
+                CODE_DIR.mkdir(parents=True, exist_ok=True)
+                sh(["git", "init", "--quiet"], CODE_DIR, check=True)
+                sh(["git", "remote", "add", "origin", "https://github.com/" + CODE_REPO + ".git"], CODE_DIR, check=True)
             cycle(args.dry_run)
         except Exception as exc:  # noqa: BLE001 - the loop must survive
             log(f"cycle failed: {exc}")

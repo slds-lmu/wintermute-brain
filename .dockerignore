@@ -1,0 +1,9 @@
+*
+!server/
+!server/**
+!plugin/
+!plugin/**
+!CLAUDE.md
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/

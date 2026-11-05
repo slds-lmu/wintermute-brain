@@ -22,10 +22,11 @@ comes later (`specs/parked.md` K40).
 plugin/            Claude Code plugin: /brain-ingest, /brain-ask, /brain-edit, /brain-lint,
                    brain skill, session-digest hooks, qmd MCP config
 plugin/tools/      index, lint, check_evidence, start-op, commit-op, log, report-health
-server/            compile worker, qmd auth proxy, GitHub App token, systemd units
+server/            container runtime, qmd gateway and GPU coordinator, compile worker, credential helpers
 admin/             admin-only tools (erasure of personal data from history); not in the plugin
 .github/workflows/ check.yml (tests of this repo); brain-check.yml and brain-index.yml
                    (reusable, called by content repos)
+                   server-image.yml (immutable GHCR builds for server deployment)
 tests/             fixture wiki, one broken copy per lint rule, git-flow tests
 specs/             the design (00–06), prior art, parked ideas, implementation status
 ```
