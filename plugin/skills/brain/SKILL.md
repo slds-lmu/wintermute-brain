@@ -92,9 +92,13 @@ tools/commit-op --agent brain-agent-interactive --invoked-by <person-slug> \
 `commit-op` regenerates the indexes, lints the changed files (with safe
 fixes), checks the preconditions (touched files unchanged upstream, created
 files new), commits with the agent as author, pushes and opens a PR with
-auto-merge, then waits for the merge. Exit 0 = merged. Exit 1 or 2 =
-rejected: `tools/start-op --discard "$WT"` and redo from a fresh worktree.
-Exit 3 = usage or environment problem: fix it, don't retry blindly.
+auto-merge, then waits up to 10 minutes for the merge. Exit 0 = merged.
+Exit 1 or 2 = rejected: `tools/start-op --discard "$WT"` and redo from a
+fresh worktree. Exit 3 = usage or environment problem: fix it, don't retry
+blindly. **Exit 4 = outcome unknown: the PR stays open. Do NOT redo** (it may
+still merge, and a redo would duplicate it). Tell the user the PR link; if
+you run unattended, report it to the "Brain health" issue
+(`tools/report-health`), then stop.
 
 Subjects: `ingest(<channel>): <id>`, `edit: <what>`, `lint: <what>`.
 Never run plain `git commit` or `git push` in the brain.

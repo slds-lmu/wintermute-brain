@@ -288,3 +288,46 @@ against GitHub or the server yet.
 - Obsidian: whether `/wiki/...` links resolve is still untested.
 - The session hook was smoke-tested with a fake transcript (spawns a
   digest, no crash); an end-to-end digest needs `gh` access to the real repo.
+
+## First live test (2026-11-05, afternoon)
+
+Run from Bernd's yolobox with the `slds-write` token (`ghr`), gitleaks
+8.30.1 and defuddle via npx in a scratch folder (not installed; Marc
+adds them to the slds docker image).
+
+- **Unit tests:** 38/38 pass. `tools/lint` on the repo: clean.
+- **First ingest worked end to end:** Karpathy's LLM-wiki gist →
+  `raw/web/2026/src-20261105-karpathy-llm-wiki/` + `wiki/source/…` +
+  `wiki/page/llm-wiki.md`; check_evidence and lint clean; PR #2 opened
+  by `commit-op`, required check passed, auto-merged (rebase) about two
+  minutes later. Commit on `main` has author `brain-agent-interactive`.
+- **A ruleset on `main` already exists** ("main: required check":
+  required check `check`, no deletion, no force-push; bypass: repository
+  admins). Not visible via the classic branch-protection API.
+
+### Problems found
+
+1. **FIXED (2026-11-05)** — new exit 4 "outcome unknown" (PR stays
+   open, never redo), 10-minute wait, check result read from the Actions
+   run; 03 § 2 step 5, skill, compile prompt, 5 new tests (43 pass),
+   verified live against PR #2. Was: **`commit-op` misreports a merged PR as failed.** `wait_for_merge`
+   asks `gh pr view` for `statusCheckRollup`, which the fine-grained
+   token may not read ("Resource not accessible by personal access
+   token"). The call fails every time, so after `--wait` seconds it
+   reports "not merged … Redo the operation" although PR #2 had merged.
+   An agent following the skill would then redo the ingest and create a
+   duplicate. **Fix:** query `state,mergedAt` separately and only read
+   check results when permitted; never advise a redo when the state is
+   unknown.
+2. **The index Action cannot push to `main`:** the ruleset's required
+   check blocks it ("Required status check "check" is expected"). So
+   `index.md` / `wiki/*/index.md` on `main` don't list the new pages yet.
+   **Fix:** the brain GitHub App (06 § 4) as the ruleset's bypass actor,
+   with its token as `BRAIN_APP_TOKEN`.
+3. **Admin bypass vs. "nobody pushes directly to `main`"** (03 § 2.1,
+   decided today): the ruleset lets repository admins bypass. Remove the
+   admin bypass once the App exists.
+4. **SSH remote in the box:** the clone's remote is `git@github.com:…`
+   and the box has no SSH agent; the test used a per-command
+   `url.https://github.com/.insteadOf` override. For members' setups,
+   clone over HTTPS (or document the override).

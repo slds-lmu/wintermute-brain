@@ -1,8 +1,8 @@
 # Regenerate the index files on main after every merge (01 § 7, 03 § 2.1)
 # and apply the safe link fix. Indexes are never part of PRs, so this
 # Action is their single writer and parallel PRs never conflict on them.
-# Commits as brain-agent-index (agents.txt). Needs branch protection to
-# allow this workflow (or the GitHub App) to push to main.
+# Commits as brain-agent-index (agents.txt) and pushes as the brain
+# GitHub App, the ruleset's only bypass actor (03 § 2.1).
 name: index
 
 on:
@@ -22,14 +22,22 @@ jobs:
     # Skip the Action's own commits to avoid a loop.
     if: github.event.head_commit.author.email != 'brain-agent-index@agents.invalid'
     steps:
+      # The default Actions token cannot bypass the ruleset's required
+      # check on main. The brain GitHub App (06 § 4) is the ruleset's only
+      # bypass actor, so push with a short-lived token minted from the
+      # App's id and private key (repo secrets BRAIN_APP_ID and
+      # BRAIN_APP_PRIVATE_KEY). App tokens expire after one hour, so a
+      # stored token would not work.
+      - uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.BRAIN_APP_ID }}
+          private-key: ${{ secrets.BRAIN_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # A token with push rights; the default token cannot bypass a
-          # required check on a protected branch. Use the GitHub App's
-          # token (06 § 4) stored as BRAIN_APP_TOKEN, or allow the
-          # brain-agent-index identity in the branch protection rule.
-          token: ${{ secrets.BRAIN_APP_TOKEN || github.token }}
+          token: ${{ steps.app.outputs.token }}
 
       - uses: actions/setup-python@v5
         with:
