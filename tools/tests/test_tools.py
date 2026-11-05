@@ -401,5 +401,58 @@ class CommitOpTest(Temp):
         self.assertIn("changed upstream", r.stdout)
 
 
+# --- commit-op: waiting for the merge (live test 2026-11-05, problem 1) ------
+
+def load_commit_op():
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("commit_op", str(TOOLS / "commit-op"))
+    spec = importlib.util.spec_from_loader("commit_op", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+class WaitForMergeTest(unittest.TestCase):
+    """wait_for_merge must never turn an unreadable or slow PR into a redo."""
+
+    def run_wait(self, responses, seconds=0):
+        mod = load_commit_op()
+        calls = []
+
+        def fake_gh(args, cwd, check=True):
+            calls.append(args)
+            key = "view" if args[:2] == ["pr", "view"] else "runs"
+            rc, out = responses[key]
+            return subprocess.CompletedProcess(args, rc, out, "" if rc == 0 else "forbidden")
+
+        mod.gh = fake_gh
+        return mod.wait_for_merge(Path("."), "https://github.com/o/r/pull/2", seconds, poll=0)
+
+    def test_merged(self):
+        r = self.run_wait({"view": (0, '{"state":"MERGED","headRefOid":"abc"}'), "runs": (0, "{}")})
+        self.assertEqual(r[0], "merged")
+
+    def test_failed_check_rejects(self):
+        runs = '{"workflow_runs":[{"name":"check","status":"completed","conclusion":"failure"}]}'
+        r = self.run_wait({"view": (0, '{"state":"OPEN","headRefOid":"abc"}'), "runs": (0, runs)})
+        self.assertEqual(r[0], "rejected")
+
+    def test_closed_rejects(self):
+        r = self.run_wait({"view": (0, '{"state":"CLOSED","headRefOid":"abc"}'), "runs": (0, "{}")})
+        self.assertEqual(r[0], "rejected")
+
+    def test_unreadable_pr_is_unknown_not_redo(self):
+        r = self.run_wait({"view": (1, ""), "runs": (1, "")})
+        self.assertEqual(r[0], "unknown")
+
+    def test_open_with_passing_check_times_out_as_unknown(self):
+        runs = '{"workflow_runs":[{"name":"check","status":"completed","conclusion":"success"}]}'
+        r = self.run_wait({"view": (0, '{"state":"OPEN","headRefOid":"abc"}'), "runs": (1, "")})
+        self.assertEqual(r[0], "unknown")
+        r = self.run_wait({"view": (0, '{"state":"OPEN","headRefOid":"abc"}'), "runs": (0, runs)})
+        self.assertEqual(r[0], "unknown")
+
+
 if __name__ == "__main__":
     unittest.main()

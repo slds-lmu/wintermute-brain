@@ -77,13 +77,24 @@ Every operation that writes follows the same path (C1, A2):
 4. **On reject** (local precondition, or the PR's required check
    fails, or the PR can't be merged): close the PR, discard the
    worktree and redo the whole operation from step 1. After **3 failed attempts**, stop and report to the
-   invoking human.
+   invoking human. "Reject" needs a clear signal: a failed
+   precondition, a failed required check, or a closed PR.
+5. **Outcome unknown** (decided 2026-11-05 after the first live test):
+   `commit-op` waits up to **10 minutes** for the merge. If the PR is
+   neither merged nor clearly rejected by then, or GitHub can't be
+   asked, the PR **stays open** and the agent **must not redo** the
+   operation (a redo after a merge would create a duplicate). It tells
+   the invoking human; unattended agents report to the "Brain health"
+   issue. A human looks at the PR. The check result is read from the
+   Actions run of the PR's commit, because fine-grained tokens cannot
+   read check runs.
 
 Because the preconditions use the base commit `B`, the script needs no
 record of what the agent read: any upstream change to a touched file
 since the start counts as a conflict. This is conservative and simple.
 
-**Humans** edit and commit normally (editor, Obsidian, GitHub). The
+**Humans** edit normally (editor, Obsidian, GitHub) and land changes
+via a PR (§ 2.1). The
 lock and human-line rules bind only agent commits. Humans may edit
 locked pages.
 
@@ -105,9 +116,12 @@ with auto-merge**. Branch protection on `main` requires the check.
   merge**, not inside PRs. Otherwise every two parallel PRs would
   conflict on the same `index.md`. One writer (the Action) means no
   conflicts. Indexes may lag a merge by a minute.
-- **Humans** may push directly or use PRs; the check runs on every
-  push to `main` as well and reports violations (humans are trusted;
-  the lock and human-line rules don't apply to them).
+- **Nobody pushes directly to `main`** (owner, 2026-11-05). Humans
+  use PRs too; the same required check gates them (the lock and
+  human-line rules don't apply to human commits). Only the index
+  Action, via the brain GitHub App, may push to `main`. Enforced by a
+  ruleset on `main`: required check `check`, no force-push, no
+  deletion, bypass only for the brain GitHub App.
 - Each operation takes a few minutes, and parallel operations queue.
   If queues get long, GitHub's merge queue may help (availability for
   our plan is [unverified]).

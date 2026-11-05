@@ -17,7 +17,12 @@ In order:
 
 Exit codes: 0 merged/pushed; 1 lint error or precondition failed or
 conflict (redo the operation from a fresh worktree); 2 PR rejected or
-could not merge (same); 3 usage or environment error.
+could not merge (same); 3 usage or environment error; 4 outcome unknown
+(the PR stays open; do NOT redo: report it, a human looks; 03 § 2).
+
+The wait reads the PR state via `gh pr view --json state` and the
+required check via the Actions runs of the PR's head commit. Fine-grained
+tokens cannot read check runs or commit statuses, so neither is used.
 
 Usage
   tools/commit-op --agent NAME --invoked-by PERSON -m "ingest(web): slug"
@@ -150,21 +155,56 @@ def gh(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedPr
     return proc
 
 
-def wait_for_merge(root: Path, pr: str, seconds: int) -> tuple[bool, str]:
+CHECK_WORKFLOW = os.environ.get("BRAIN_CHECK_WORKFLOW", "check")
+FAILED = ("failure", "cancelled", "timed_out", "action_required", "startup_failure")
+
+
+def pr_info(root: Path, pr: str) -> dict | None:
+    """State and head commit of a PR; None if GitHub can't be asked."""
+    proc = gh(["pr", "view", pr, "--json", "state,headRefOid"], root, check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+
+
+def check_conclusion(root: Path, sha: str) -> str | None:
+    """Conclusion of the required check workflow for a commit, read from the
+    Actions runs (pull_request event); None while running or unreadable."""
+    proc = gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}&event=pull_request"], root, check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        runs = json.loads(proc.stdout or "{}").get("workflow_runs") or []
+    except json.JSONDecodeError:
+        return None
+    for run in runs:
+        if run.get("name") == CHECK_WORKFLOW and run.get("status") == "completed":
+            return run.get("conclusion")
+    return None
+
+
+def wait_for_merge(root: Path, pr: str, seconds: int, poll: float = 15) -> tuple[str, str]:
+    """Returns ("merged" | "rejected" | "unknown", reason). "rejected" only on
+    a clear signal (PR closed, required check failed); everything else that
+    is not a merge within the time is "unknown", never a reason to redo."""
     deadline = time.time() + seconds
-    while time.time() < deadline:
-        proc = gh(["pr", "view", pr, "--json", "state,mergedAt,statusCheckRollup"], root, check=False)
-        if proc.returncode == 0:
-            data = json.loads(proc.stdout or "{}")
-            if data.get("state") == "MERGED":
-                return True, "merged"
-            if data.get("state") == "CLOSED":
-                return False, "PR was closed"
-            for check in data.get("statusCheckRollup") or []:
-                if check.get("conclusion") in ("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"):
-                    return False, f"required check failed: {check.get('name') or check.get('context')}"
-        time.sleep(15)
-    return False, f"not merged after {seconds}s"
+    while True:
+        info = pr_info(root, pr)
+        if info:
+            state = info.get("state")
+            if state == "MERGED":
+                return "merged", "merged"
+            if state == "CLOSED":
+                return "rejected", "PR was closed"
+            sha = info.get("headRefOid")
+            if sha and check_conclusion(root, sha) in FAILED:
+                return "rejected", f"required check '{CHECK_WORKFLOW}' failed"
+        if time.time() >= deadline:
+            return "unknown", f"not merged after {seconds}s" + ("" if info else " (could not read the PR)")
+        time.sleep(poll)
 
 
 def main(argv: list[str]) -> int:
@@ -178,7 +218,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--overrides", action="append", default=[], help="Overrides-human: source page (/wiki/…)")
     ap.add_argument("--upstream", default="origin/main")
     ap.add_argument("--no-pr", action="store_true", help="push straight to main (fast-forward) instead of a PR")
-    ap.add_argument("--wait", type=int, default=900, help="seconds to wait for the PR to merge (0 = don't wait)")
+    ap.add_argument("--wait", type=int, default=600, help="seconds to wait for the PR to merge (0 = don't wait)")
     ap.add_argument("--cleanup", action="store_true", help="remove the worktree after success")
     ap.add_argument("--check", action="store_true", help="preconditions only")
     ap.add_argument("--base")
@@ -296,12 +336,22 @@ def main(argv: list[str]) -> int:
             return 2
         log(f"opened {pr_url} with auto-merge")
         if args.wait > 0:
-            ok, why = wait_for_merge(root, pr_url, args.wait)
-            if not ok:
-                log(f"PR not merged: {why}; closing it. Redo the operation.")
-                gh(["pr", "close", pr_url, "--delete-branch"], root, check=False)
-                return 2
-            log("merged")
+            outcome, why = wait_for_merge(root, pr_url, args.wait)
+            if outcome == "unknown":
+                log(f"outcome unknown: {why}. The PR stays open: {pr_url}. "
+                    "Do NOT redo the operation; report it (03 § 2).")
+                return 4
+            if outcome == "rejected":
+                # It may have merged in the meantime: never close a merged PR.
+                info = pr_info(root, pr_url)
+                if info and info.get("state") == "MERGED":
+                    log("merged")
+                else:
+                    log(f"PR rejected: {why}; closing it. Redo the operation.")
+                    gh(["pr", "close", pr_url, "--delete-branch"], root, check=False)
+                    return 2
+            else:
+                log("merged")
 
     if args.cleanup:
         main_root = Path(git(["rev-parse", "--path-format=absolute", "--git-common-dir"], root).strip()).parent
