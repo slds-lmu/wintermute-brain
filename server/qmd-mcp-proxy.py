@@ -12,7 +12,7 @@ Stdlib only. Run behind TLS (a reverse proxy such as caddy or nginx);
 tokens must never travel in plain HTTP.
 
 Environment
-  BRAIN_REPO       repo whose read access grants search access    slds-lmu/brain-group
+  BRAIN_REPO       repo whose read access grants search access    slds-lmu/wintermute-brain-content-slds
   QMD_UPSTREAM     qmd MCP server URL                              http://127.0.0.1:8182/mcp
   PROXY_PORT       listen port                                     8181
 
@@ -29,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 
-REPO = os.environ.get("BRAIN_REPO", "slds-lmu/brain-group")
+REPO = os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds")
 UPSTREAM = os.environ.get("QMD_UPSTREAM", "http://127.0.0.1:8182/mcp").rstrip("/")
 PORT = int(os.environ.get("PROXY_PORT", "8181"))
 CACHE_TTL = 300

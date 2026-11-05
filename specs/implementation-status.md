@@ -10,7 +10,7 @@ showed, and what is still open. Design decisions live in the specs
 ## 1. Built (MVP, 2026-11-05, PR #1 by Marc Becker)
 
 Specs 00–06 accepted; this repo *is* the brain repo (later
-`slds-lmu/brain-group`).
+`slds-lmu/wintermute-brain-content-slds`).
 
 | Part | Where | Spec |
 |---|---|---|
@@ -172,3 +172,10 @@ Problems found and how they were handled:
     filename (`r11.png`), not a URL.
   - Missing person pages for the other mlr3mbo authors (named, not
     linked).
+- **Code/content split** (K32, 01 § 1; 2026-11-05): code repo
+  `wintermute-brain` keeps tools (now `plugin/tools/`, shipped with the
+  plugin), plugin, server, specs, tests and reusable workflows
+  (`brain-check.yml`, `brain-index.yml`); content moves to the new repo
+  `wintermute-brain-content-slds` (fresh start), pinned to code tag
+  `v0.1.0` via `.brain-version`. The test content of today stays only in
+  this repo's history.

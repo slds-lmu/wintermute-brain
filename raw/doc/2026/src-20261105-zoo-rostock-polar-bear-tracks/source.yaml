@@ -1,8 +1,0 @@
-id: src-20261105-zoo-rostock-polar-bear-tracks
-channel: doc
-title: "Zoo Rostock: 346 tracks of 5 polar bears, 25,783 frames"
-url:                         # local file r11.png, given by the user
-authors: []                  # the figure names no author
-retrieved: 2026-11-05
-ingested_by: jan-petermann
-files: [r11.png, transcription.md]   # transcription.md: verbatim text of the figure, made at ingest

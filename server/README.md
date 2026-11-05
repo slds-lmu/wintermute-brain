@@ -8,7 +8,9 @@ with its auth proxy, and (later) PDF conversion and the Mattermost bot.
 ```bash
 sudo useradd -m brain
 sudo -iu brain
-git clone git@github.com:slds-lmu/brain-group.git ~/brain-group   # full clone incl. LFS
+# Code and content are separate repos (01 § 1). Clone both over HTTPS:
+git clone https://github.com/slds-lmu/wintermute-brain-content-slds.git ~/content   # full clone incl. LFS
+git clone https://github.com/slds-lmu/wintermute-brain.git ~/code                     # checked out at .brain-version by the worker
 sudo apt install python3-yaml gitleaks                                # or pip install pyyaml + gitleaks release
 npm install -g @anthropic-ai/claude-code                              # the agent CLI
 # qmd: pin a version (01 § 7); it needs ~2 GB of local models for hybrid mode
@@ -16,13 +18,10 @@ npm install -g @anthropic-ai/claude-code                              # the agen
 
 ## 2. GitHub App (06 § 4)
 
-Create a GitHub App in `slds-lmu` with permissions *Contents: read &
-write*, *Pull requests: read & write*, *Issues: read & write*, *Metadata:
-read*. Install it on the brain repo only. Note the App id and the
-installation id, download the private key. Allow the App to bypass the
-PR requirement for the index Action if you use the App's token there
-(workflow `index.yml`), or let the `brain-agent-index` commits in via a
-branch-protection bypass.
+The App exists: `wintermute-brain` (id 5628051, see
+`specs/implementation-status.md` § 3), installed on the code repo and on
+`wintermute-brain-content-slds`, and the content repo's ruleset bypass
+actor. The server needs its private key and installation id.
 
 Git pushes use the token too: the worker's clone should use HTTPS with a
 credential helper that reads `GH_TOKEN`, e.g.
@@ -36,8 +35,9 @@ git config --global credential.helper '!f() { echo "username=x-access-token"; ec
 `/etc/brain/worker.env` (readable by the `brain` user only):
 
 ```
-BRAIN_DIR=/home/brain/brain-group
-BRAIN_REPO=slds-lmu/brain-group
+BRAIN_DIR=/home/brain/content
+BRAIN_CODE_DIR=/home/brain/code
+BRAIN_REPO=slds-lmu/wintermute-brain-content-slds
 BRAIN_MODEL=sonnet
 BRAIN_POLL=300
 BRAIN_QMD=qmd update
@@ -58,15 +58,15 @@ sudo systemctl enable --now brain-worker brain-qmd-proxy
 journalctl -u brain-worker -f
 ```
 
-Try one cycle by hand first: `BRAIN_DIR=~/brain-group python3 server/worker.py --once --dry-run`.
+Try one cycle by hand first: `BRAIN_DIR=~/content BRAIN_CODE_DIR=~/code python3 ~/code/server/worker.py --once --dry-run`.
 
 ## 5. What the worker does every cycle
 
 1. `git pull --ff-only origin main`.
-2. Queue = `tools/check_evidence --queue` (raw items without a summary page).
-3. For each item: `tools/start-op --agent brain-agent-compile`, then a
+2. Queue = `plugin/tools/check_evidence --queue` (oldest first) (raw items without a summary page).
+3. For each item: `plugin/tools/start-op --agent brain-agent-compile`, then a
    `claude -p` run with the brain plugin and `server/compile-prompt.md`
-   that compiles the item and commits via `tools/commit-op` (PR with
+   that compiles the item and commits via `plugin/tools/commit-op` (PR with
    auto-merge). Success is verified by the item leaving the queue after
    the next pull. Three failures → a comment on the "Brain health" issue
    and a 24-hour backoff for that item.
