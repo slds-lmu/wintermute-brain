@@ -44,8 +44,11 @@ Per member, once:
 # tools (06 § 2)
 sudo apt install gitleaks            # or a pinned release; secret scan before a digest leaves the machine
 npm install -g defuddle              # web ingest only
-# a clone for ingest/edit/lint (not needed for /brain-ask or digests)
-GIT_LFS_SKIP_SMUDGE=1 git clone git@github.com:slds-lmu/brain-group.git ~/brain-group
+# a clone for ingest/edit/lint (not needed for /brain-ask or digests).
+# Clone over HTTPS, not SSH: git then uses the same token as `gh` (which
+# opens the PRs), and it works in containers and on the server without SSH
+# keys (live test 2026-11-05).
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/slds-lmu/brain-group.git ~/brain-group
 # environment (shell profile)
 export BRAIN_DIR=~/brain-group
 export BRAIN_REPO=slds-lmu/brain-group

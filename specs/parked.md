@@ -25,6 +25,7 @@ Look at these first when v1 runs.
 | K27 | **PRIORITY. Personal-data policy.** For now (test phase) humans decide what gets ingested, with no policy. Before wider use: what may be ingested; how deletion requests (GDPR) are handled; how data is removed from git history, LFS and backups (painful, gets worse with time); whether sensitive raw sources stay out of git | owner, 2026-11-05; 00 § 8 | 00, 02, 06 |
 | K28 | **PRIORITY (very high). Recorded oral meetings as a source.** Record → transcribe with timestamps (e.g. whisperX on the GPU server, proposals I15) → raw `meeting` item → `meeting` page with decisions and action items, citing transcript timestamps. Open: consent of participants, what is kept (audio or only the transcript), K27 personal data | owner, 2026-11-05 | 00 R12, 02, 06 |
 | K30 | **PRIORITY. Backup outside GitHub.** For now GitHub only, plus branch protection on `main`. Candidate: the server keeps a full mirror (incl. all LFS files) on a disk covered by the university backup; it already pulls every 5 minutes | owner, 2026-11-05 (06-Q8) | 06 |
+| K31 | **Enforce "nobody pushes directly to `main`" for admins.** The ruleset still lets repository admins bypass (direct pushes skip lint and the concurrency precondition). Lenient during the test phase (owner, 2026-11-05). Before wider use: switch the admin bypass to "pull requests only" (escape hatch for a broken check) or remove it | owner, 2026-11-05; live test problem 3 | 03 § 2.1 |
 
 ## From the O3 decision (2026-11-05)
 

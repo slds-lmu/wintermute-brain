@@ -319,15 +319,22 @@ adds them to the slds docker image).
    duplicate. **Fix:** query `state,mergedAt` separately and only read
    check results when permitted; never advise a redo when the state is
    unknown.
-2. **The index Action cannot push to `main`:** the ruleset's required
+2. **FIXED (2026-11-05)** — GitHub App `wintermute-brain` (ID 5628051)
+   created, installed, added to the ruleset as bypass actor; the index
+   Action mints an App token per run. Verified: after PR #3 merged, the
+   Action pushed `index: regenerate` (author `brain-agent-index`) and the
+   indexes list the new pages. Was: **The index Action cannot push to `main`:** the ruleset's required
    check blocks it ("Required status check "check" is expected"). So
    `index.md` / `wiki/*/index.md` on `main` don't list the new pages yet.
    **Fix:** the brain GitHub App (06 § 4) as the ruleset's bypass actor,
    with its token as `BRAIN_APP_TOKEN`.
-3. **Admin bypass vs. "nobody pushes directly to `main`"** (03 § 2.1,
+3. **PARKED as K31 (owner, 2026-11-05):** lenient during the test
+   phase. Was: **Admin bypass vs. "nobody pushes directly to `main`"** (03 § 2.1,
    decided today): the ruleset lets repository admins bypass. Remove the
    admin bypass once the App exists.
-4. **SSH remote in the box:** the clone's remote is `git@github.com:…`
+4. **DONE (2026-11-05):** this clone now uses HTTPS (`gitr slds-write`
+   for pushes in the box); plugin README and skill say "clone over
+   HTTPS". Was: **SSH remote in the box:** the clone's remote is `git@github.com:…`
    and the box has no SSH agent; the test used a per-command
    `url.https://github.com/.insteadOf` override. For members' setups,
    clone over HTTPS (or document the override).

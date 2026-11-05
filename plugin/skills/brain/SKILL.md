@@ -29,8 +29,8 @@ history is the log (`tools/log`).
 | search server (qmd MCP) | `BRAIN_QMD_URL` | `http://localhost:8181/mcp` |
 
 Query works without a clone when the `brain-search` MCP server is reachable.
-Ingest, edit and lint need the clone (`git clone` with LFS downloads skipped:
-`GIT_LFS_SKIP_SMUDGE=1 git clone …`). If `BRAIN_DIR` is missing, tell the user
+Ingest, edit and lint need the clone, over HTTPS and with LFS downloads
+skipped: `GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/<BRAIN_REPO>.git`. If `BRAIN_DIR` is missing, tell the user
 how to clone it and stop.
 
 ## Rules for every operation (03 § 1)
