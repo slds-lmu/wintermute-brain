@@ -1,0 +1,23 @@
+\begin{table}[H]
+  \centering
+  \caption{Search space for mixed-hierarchical instances.}
+  \label{tab:mlr3mbo-search-space-mixed}
+  \begin{tabular}{lllll}
+    \toprule
+    Parameter            & Values                 & Dependency & Default \\
+    \midrule
+    Input trafo          & None, unitcube         & --         & None    \\
+    Output trafo         & None, standardize, log & --         & None    \\
+    Init                 & Random, LHS, Sobol     & --         & Random  \\
+    Init size            & 0.05, 0.10, 0.25       & --         & 0.25    \\
+    Random interleave    & 0, 2, 4                & --         & 0       \\
+    Variance estimator   & Jackknife, ESD, LTV    & --         & ESD     \\
+    Trees                & 10, 500                & --         & 500     \\
+    Acquisition function & EI, LCB, PI, mean      & --         & EI      \\
+    $\lambda$            & 1, 3, 10               & Acqf = LCB & 1      \\
+    Optimizer            & RS 1000, RS, FS, LS    & --         & RS 1000 \\
+    $\epsilon$ decay     & TRUE, FALSE            & Acqf = EI  & FALSE   \\
+    $\lambda$ decay      & TRUE, FALSE            & Acqf = LCB & FALSE      \\
+    \bottomrule
+  \end{tabular}
+\end{table}

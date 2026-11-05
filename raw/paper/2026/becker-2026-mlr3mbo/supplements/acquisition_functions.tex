@@ -1,0 +1,28 @@
+\begin{table}[H]
+  \centering
+  \caption{Acquisition Functions.
+    Acquisition functions are constructed with the \texttt{acqf(key)}.
+    Call \texttt{\$help()} to access the help page of the acquisition function e.g. \texttt{acqf("ei")\$help()}.
+    The help page describes the formula of the acquisition function and the parameters that can be set.}
+  \label{tab:acqfunctions}
+  \begin{tabularx}{\textwidth}{l>{\RaggedRight\arraybackslash}Xl}
+    \toprule
+    Key            & Description                                                                                                                                 & Reference                   \\
+    \midrule
+    \texttt{aei}            & Augmented expected improvement for noisy optimization. $c$ controls the exploration-exploitation trade-off                                  & \protect\citeauthorsup{huang2006}    \\
+    \texttt{cb}             & Lower / upper confidence bound. $\lambda$ controls the exploration-exploitation trade-off                                                   & \protect\citeauthorsup{snoek2012}    \\
+    \texttt{ehvi}           & Expected hypervolume improvement for multi-criteria optimization                                                                            & \protect\citeauthorsup{emmerich2016} \\
+    \texttt{ehvigh}         & Expected hypervolume improvement via GH quadrature for multi-criteria optimization                                                          & \protect\citeauthorsup{rahat2022}    \\
+    \texttt{ei}             & Expected improvement                                             & \protect\citeauthorsup{jones1998}    \\
+    \texttt{ei\_log}        & Expected improvement. Assumes that the surrogate models on log scale                                                            &                          \protect\citeauthorsup{hutter2011}\citeauthorsup{watanabe2024}   \\
+    \texttt{eips}           & Expected improvement per second. Balances performances and computation time                                                                 & \protect\citeauthorsup{snoek2012}    \\
+    \texttt{mean}           & Posterior mean. Mean of the surrogate model                                                                                                 &                             \\
+    \texttt{multi}          & Multiple acquisition functions. Combines multiple acquisition functions                                                                     &                             \\
+    \texttt{pi}             & Probability of improvement.                                                                                                                 & \protect\citeauthorsup{kushner1964}  \\
+    \texttt{sd}             & Posterior standard deviation. Standard deviation of the surrogate model                                                                     &                             \\
+    \texttt{smsego}         & S-metric selection evolutionary global optimization for multi-criteria optimization. Maximizing the expected improvement in the hypervolume & \protect\citeauthorsup{beume2007}    \\
+    \texttt{stochastic\_cb} & Stochastic lower / upper confidence bound for asynchronous optimization. Samples $\lambda$ from a distribution                              & \protect\citeauthorsup{snoek2012}    \\
+    \texttt{stochastic\_ei} & Stochastic expected improvement for asynchronous optimization. Samples $\epsilon$ from a distribution                                       & \protect\citeauthorsup{jones1998}    \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

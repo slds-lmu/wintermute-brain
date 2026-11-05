@@ -1,0 +1,28 @@
+\begin{table}[H]
+  \centering
+  \caption{Search space for purely numeric instances.}
+  \label{tab:mlr3mbo-search-space-numeric}
+  \begin{tabular}{lllll}
+    \toprule
+    Parameter            & Values                          & Dependency     & Default \\
+    \midrule
+    Input trafo          & None, unitcube                  & --             & None    \\
+    Output trafo         & None, standardize, log          & --             & None    \\
+    Init                 & Random, LHS, Sobol              & --             & Random  \\
+    Init size            & 0.05, 0.10, 0.25                & --             & 0.25    \\
+    Random interleave    & 0, 2, 4                         & --             & 0       \\
+    Surrogate            & RF, GP                          & --             & GP      \\
+    Extratrees           & TRUE, FALSE                     & Surrogate = RF &  FALSE  \\
+    Trees                & 10, 500                         & Surrogate = RF & 500     \\
+    Variance estimator   & Jackknife, ESD, LTV             & Surrogate = RF &  Jack    \\
+    Kernel               & \makecell[l]{Gauss, Matérn~$3/2$,                            \\ Matérn~$5/2$, Exp}   & Surrogate = GP & Gauss \\
+    Nugget               & 0, 1e-3, 1e-8                   & Surrogate = GP & 0       \\
+    Scaling              & TRUE, FALSE                     & Surrogate = GP & FALSE   \\
+    Acquisition function & EI, LCB, PI, mean               & --             & EI    \\
+    $\lambda$            & 1, 3, 10                        & Acqf = LCB     & 1     \\
+    Optimizer            & \makecell[l]{RS 1000, RS, LS,                              \\DIRECT, CMA-ES, L-BFGS-B} & -- & RS 1000 \\
+    $\epsilon$ decay     & TRUE, FALSE                     & Acqf = EI      &  FALSE      \\
+    $\lambda$ decay      & TRUE, FALSE                     & Acqf = LCB     &  FALSE     \\
+    \bottomrule
+  \end{tabular}
+\end{table}

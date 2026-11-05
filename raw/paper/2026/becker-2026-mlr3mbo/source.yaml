@@ -1,0 +1,10 @@
+id: becker-2026-mlr3mbo
+channel: paper
+title: "mlr3mbo: Bayesian Optimization in R"
+url: https://arxiv.org/abs/2603.29730v2
+arxiv: "2603.29730"
+authors: [Marc Becker, Lennart Schneider, Martin Binder, Lars Kotthoff, Bernd Bischl]
+published: 2026-03-31
+retrieved: 2026-11-05
+ingested_by: marc-becker
+files: [paper.pdf, article.tex, references.bib, arxiv.xml, supplements/acquisition_functions.tex, supplements/local_search.tex, supplements/loop_function.tex, supplements/mixed_ablation.tex, supplements/mixed_instances.tex, supplements/mixed_search_space.tex, supplements/numeric_ablation.tex, supplements/numeric_instances.tex, supplements/numeric_search_space.tex, supplements/optimizers.tex, supplements/output_transformations.tex, supplements/software-versions.tex, supplements/technical_details.tex, supplements/terminators.tex, supplements/uncertainty_estimation.tex]
