@@ -26,16 +26,18 @@ def check(cfg: dict, env: dict) -> int:
     """Self-check: the things the first user test tripped over."""
     ok = True
 
-    def report(good: bool, what: str, hint: str = "") -> None:
+    def report(good: bool, what: str, hint: str = "", optional: bool = False) -> None:
         nonlocal ok
-        ok &= good
-        print(("  ok    " if good else "  FAIL  ") + what + ("" if good else f"\n        → {hint}"))
+        if not optional:
+            ok &= good
+        label = "  ok    " if good else ("  note  " if optional else "  FAIL  ")
+        print(label + what + ("" if good else f"\n        → {hint}"))
 
     repo, content = env["BRAIN_REPO"], Path(env["BRAIN_DIR"])
     for tool in ("git", "gh", "claude"):
         report(shutil.which(tool) is not None, f"{tool} installed", f"install {tool}")
     report(shutil.which("gitleaks") is not None, "gitleaks installed (optional)",
-           "optional: without it a built-in secret scan is used")
+           "not installed: a built-in secret scan is used instead", optional=True)
     r = subprocess.run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.push"], env=env,
                        capture_output=True, text=True)
     report(r.stdout.strip() == "true", f"write access to {repo}",

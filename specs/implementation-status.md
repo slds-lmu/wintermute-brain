@@ -349,3 +349,11 @@ ingest. Findings (open unless marked):
   test content); (c) two tokens. **Decided (owner): (b), the code repo
   becomes public.** A gitleaks scan of its full history (all branches)
   found no secrets. The brain token then needs only the content repo.
+- **N18, fixed:** the self-check reported the optional gitleaks as
+  FAIL, so setup ended with "setup has problems" and no "Done" line.
+  Optional items now show as "note".
+- **Worked:** plain clone of the public code repo; token prompt
+  (pasted, stored in `~/.config/brain/token`); person slug suggested
+  from the git name; write access confirmed; clones without PDFs; config
+  and `brain` installed; git reached the content repo with the same login
+  (the 403 of test 1 is gone).
