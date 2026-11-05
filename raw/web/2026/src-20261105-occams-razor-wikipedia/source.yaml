@@ -1,0 +1,8 @@
+id: src-20261105-occams-razor-wikipedia
+channel: web
+title: "Occam's razor"
+url: https://en.wikipedia.org/wiki/Occam%27s_razor
+authors: []                  # Wikipedia article; the fetched page names no author
+retrieved: 2026-11-05
+ingested_by: jonas-muller
+files: [page.md]
