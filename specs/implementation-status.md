@@ -229,3 +229,6 @@ Problems found and how they were handled:
   dry run reports and changes nothing, not shipped with the plugin.
   **Not tested:** the actual rewrite and force-push (needs
   git-filter-repo, not installed in the test environment).
+- **v0.1.4** (2026-11-05): session-start capture notice (PD3), dispute
+  age in lint and "resolve only clear cases" in skill and compile
+  prompt (K17), scope check (v0.1.3). Content repo moved to it.

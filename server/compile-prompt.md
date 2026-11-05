@@ -14,6 +14,9 @@ to raw/.
   main cascade target. "Keep nothing by default" already happened on the
   member's machine, so what is in the digest is worth a page update, but
   skip anything that merely restates existing wiki pages.
+- Resolve an open `Status: Disputed` block only if the item explicitly
+  corrects or replaces one side (erratum, retraction, final version of a
+  preprint); state it in `--reason` (03 § 5.4). Otherwise leave it.
 - Keep the digest's marks on the assistant's contributions ("the
   assistant's calculation", "suggestion"): such items never become plain
   facts or results on a page. Put them with their mark, e.g. under an

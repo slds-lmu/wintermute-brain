@@ -256,6 +256,14 @@ class LintGitTest(Temp):
         self.edit("wiki/page/llm-wiki.md", "Agent-written line.", "")
         self.assertEqual(self.lint("--base", "HEAD", "--agent", "brain-agent-interactive").returncode, 0)
 
+    def test_disputed_block_listed_with_age(self):
+        self.edit("wiki/page/llm-wiki.md", "## Related", "> **Status: Disputed**\n> A says 1 [a](/wiki/paper/karpathy-2026-llm-wiki.md).\n\n## Related")
+        git(["commit", "--quiet", "-am", "edit: dispute"], self.root,
+            env={"GIT_AUTHOR_DATE": "2026-01-01T12:00:00", "GIT_COMMITTER_DATE": "2026-01-01T12:00:00"})
+        r = self.lint()
+        self.assertIn("open Status: Disputed block, open for", r.stdout)
+        self.assertNotIn("error", r.stdout.split("disputed")[0][-200:])
+
     def test_scope_check_flag_is_listed(self):
         self.edit("wiki/page/llm-wiki.md", "tags: [", "tags: [scope-check, ")
         self.edit("wiki/page/llm-wiki.md", "## Definition", "> **Scope check:** looks like a hobby topic\n\n## Definition")

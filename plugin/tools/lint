@@ -81,6 +81,20 @@ INJECTION_PATTERNS = [
 INVISIBLE_CHARS = set(range(0x200B, 0x2010)) | set(range(0x202A, 0x2030)) | set(range(0x2060, 0x2070)) | {0xFEFF}
 
 
+def line_time(rel: str, line: int, root: Path) -> int | None:
+    """Author time of the commit that last wrote this line (git blame);
+    None outside git or for uncommitted lines."""
+    try:
+        r = subprocess.run(["git", "blame", "--porcelain", "-L", f"{line},{line}", "--", rel],
+                           cwd=root, capture_output=True, text=True)
+    except OSError:
+        return None
+    m = re.search(r"^author-time (\d+)$", r.stdout, re.M)
+    if r.returncode != 0 or not m or r.stdout.startswith("0000000000000000000000000000000000000000"):
+        return None
+    return int(m.group(1))
+
+
 class Linter:
     def __init__(self, root: Path, args: argparse.Namespace):
         self.root = root
@@ -209,10 +223,13 @@ class Linter:
                 self.add("warn", "orphan", p.rel, "no inbound links from other pages")
 
     def check_disputed(self):
+        """Open disputes stay info, listed with their age (03 § 5.4, D3)."""
         for p in self.scoped_pages():
             for i, line in enumerate(p.text.splitlines(), 1):
                 if DISPUTED_RE.match(line):
-                    self.add("info", "disputed", p.rel, "open Status: Disputed block", i)
+                    t = line_time(p.rel, i, self.root)
+                    age = f", open for {int((time.time() - t) // 86400)} days" if t else ""
+                    self.add("info", "disputed", p.rel, f"open Status: Disputed block{age}", i)
 
     def check_scope(self):
         """Pages the agent flagged against scope.md (01 § 2.1) stay listed

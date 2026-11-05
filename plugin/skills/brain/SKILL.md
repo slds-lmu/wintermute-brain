@@ -205,6 +205,13 @@ disagreement between sources keeps both claims under the claim:
 > A reports 92% [A](/wiki/paper/a.md); B reports 85% on the same benchmark [B](/wiki/paper/b.md).
 ```
 
+- **Resolving a dispute** (03 § 5.4): if the new source *explicitly*
+  corrects or replaces the source of one side of an open `Status: Disputed`
+  block (an erratum, a retraction, the final version of a preprint), resolve
+  it yourself: keep the corrected claim with its citation, remove the block,
+  and give the reason (`--reason "page/x: dispute resolved, B is the
+  published version of preprint A"`). Otherwise never resolve a dispute;
+  you may only propose a resolution in a lint report.
 - **The assistant's contributions stay marked:** content a source marks as
   the assistant's calculation, suggestion or judgment (session digests)
   never becomes a plain fact, decision or result on a page; keep the mark.
@@ -241,6 +248,11 @@ otherwise. The same holds for `compile:` and `edit:`.
    digest hook captures new knowledge from this conversation into `raw/`.
 
 ## Edit (`/brain-edit <request>`) — writes wiki/
+
+To resolve a dispute on a human's request ("resolve the dispute on page X: B
+holds because …"), keep the claim that holds with its citation, remove the
+`Status: Disputed` block, and pass the human's reason as `--reason`.
+
 
 A change a human asks for (fix a claim, merge two pages, deprecate a page,
 retag). Follow the write path with `-m "edit: <what>"`. Keep citations
