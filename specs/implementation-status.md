@@ -72,6 +72,9 @@ scratch folder (Marc adds them to the slds docker image).
 | Index Action via the App | pushed `index: regenerate` after PRs #3 and #4 |
 | Query (by hand, grep fallback) | answer from wiki pages with citations and limits |
 | Session channel end to end: 7 digests of this design session (02 § 2), then one compile-worker pass run by hand (`server/worker.py --once`, Sonnet, no qmd) | 7 digest PRs (#5–#11) and 7 compile PRs (#12–#21), all merged, no failures; one project page `wintermute-brain` built up by update, never duplicated; others ingested in parallel (#15, #16, #19) without conflicts |
+| Ingest 3 (web, new; Jan's laptop): FAU profile of Jonas Müller | PR #16; source + person page, merged first try |
+| Ingest 4 (local file, `doc` channel): `r11.png`, a histogram figure | PR #22; PNG in LFS (checked on `main`) plus a verbatim `transcription.md`; summary page only |
+| Ingest 5 (paper, DOI, update): `10.1007/s00521-026-12145-5` | PR #25; paper page plus update of `person/jonas-muller`, no duplicate person page |
 
 Problems found and how they were handled:
 
@@ -102,8 +105,9 @@ Problems found and how they were handled:
     ingest relies on litdownload (arXiv TeX/HTML) until then.
   - qmd: pick and pin a version (its MCP HTTP flags depend on it); test
     at several thousand files; set up on the server.
-- **Not yet tested live:** paper ingest, session digests end to end, the
-  server worker, `/brain-lint`, `/brain-edit`.
+- **Not yet tested live:** the server worker, `/brain-lint`,
+  `/brain-edit`, `/brain-ask` over the qmd MCP server, Disputed blocks,
+  locked pages, concurrent writers on the same page.
 - Who administers the server worker and the API key (06 § 8).
 
 ## 6. Changes after the live tests (2026-11-05)
@@ -153,3 +157,40 @@ Problems found and how they were handled:
   8. **Scope is not checked.** An out-of-scope test source (PR #22,
      polar-bear tracks at a zoo) can be ingested; neither triage nor
      lint enforces 00 § 3.
+- **Ingest test findings** (Jan, 2026-11-05, ingests 3–5; all open):
+  1. **Skill and spec disagree on dispositions.** 03 § 3 step 4 says
+     "state one disposition"; the `brain` skill says New, Update and
+     Disputed "may combine". `commit-op --disposition` accepts one value,
+     so a paper that is New and updates a person page (PR #25) was
+     recorded as `New`. Decide which is right, fix the spec, then the
+     skill or `commit-op` (e.g. a repeatable flag).
+  2. **`commit-op --note` keeps only the last note.** Repeated `--note`
+     flags overwrite each other (argparse default); PR #25 lost one. Fix:
+     `action="append"`, one `Note:` trailer each.
+  3. **`slds-paper-litdownload` is not available outside the slds
+     image.** Paper ingest on a member laptop fell back to Crossref
+     (metadata), Unpaywall (open copy) and the arXiv API and e-print
+     (PDF, LaTeX). The publisher PDF was paywalled, so the text is the
+     preprint; the paper page says so. Either ship the skill with the
+     plugin or document this fallback in the skill.
+  4. **`check_evidence` misses literals inside URLs.** The arXiv id
+     `2504.01739` occurs in `arxiv.xml` only inside URLs and query
+     strings and was flagged as missing. LaTeX forms are also not
+     matched (`$20\%$` vs `20%`). It did catch a real misquote ("come"
+     vs "comes"). Fix: normalise URL-encoded and LaTeX forms in the raw
+     text before matching.
+  5. **Nothing enforces LFS for binaries in `raw/`.** git-lfs was not
+     installed on the laptop; without it `r11.png` would have been
+     committed as a plain blob with no error from `commit-op`, lint or
+     CI (`check.yml` checks out with `lfs: false`). Fix: lint rule
+     "every `raw/` path matching `.gitattributes` LFS patterns is an LFS
+     pointer", and a `start-op` check that `git lfs` exists.
+  6. **No rule for image sources.** `check_evidence` reads only text
+     files, so a figure has nothing to check literals against. Ingest 4
+     added a verbatim `transcription.md` of the figure's text (title,
+     axes, legend; no values read off the plot). Make this the rule in
+     01 § 4 and the skill, or choose another one.
+  7. **gitleaks is not installed on member laptops.** The secret scan
+     was done by hand (pattern grep) in ingests 3–5 and noted in the
+     commit. Either require gitleaks for interactive ingest
+     (`start-op` check) or let CI run it on the PR.
