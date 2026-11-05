@@ -40,11 +40,15 @@ Agent commits use a dedicated author per agent kind (e.g. `brain-agent-compile`)
 
 The owner chose rebase-and-merge as a trial, to keep one commit per operation in a linear history; merge commits are the fallback [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
 
-Nobody pushes directly to `main`, humans included; everyone uses PRs. The only exception is the index Action, which needs the brain GitHub App (not created yet). The ruleset is deferred: not blocking for a first test, but necessary before unattended agents or other members join, and it has to come together with the GitHub App [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+Nobody pushes directly to `main`, humans included; everyone uses PRs. The only exception is the index Action, which needs the brain GitHub App (not created yet). The ruleset was first deferred [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md); it is now active, and the brain GitHub App is its only bypass actor: the index Action mints an App token per run from two repo secrets. Repository admins can still push directly to `main`, accepted during the test phase; before wider use this should become "pull requests only" or be removed (parked as K31) [First live test digest](/wiki/source/src-20261105-wintermute-brain-first-live-brain-test-commit-o-98411f.md).
 
 ## Implementation status
 
 Marc's PR #1 (`d0cd9e1`) implemented the MVP from specs 00–06; 38 tests pass and lint reports 0 errors and 0 warnings. The `check` and `index` workflows ran green on GitHub. Not done: branch protection or ruleset, the GitHub App, qmd pinning, and a real-transcript test of the session hook [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+
+## First live test
+
+Two live ingests on 2026-11-05 passed (PRs #2 and #4 merged). `commit-op` first reported a merged PR as failed because the `slds-write` token gets 403 on check runs; it now uses the PR state plus the Actions workflow run, waits 10 minutes, and returns exit code 4 ("outcome unknown") without closing the PR, so agents must not redo the operation. Members and the server clone over HTTPS; the host's shared clone stays on SSH, because changing its remote broke the host's pushes. Open gap: no check covers `source.yaml` metadata, after an author's full name was filled in from memory. Members need gitleaks and defuddle (to be added to the slds docker image) [First live test digest](/wiki/source/src-20261105-wintermute-brain-first-live-brain-test-commit-o-98411f.md).
 
 ## GitHub tokens
 
