@@ -532,5 +532,44 @@ class DigestPiecesTest(unittest.TestCase):
         self.assertEqual(mod.pieces(records, 1, 10, turns=20), [(1, 10)])
 
 
+# --- session digests: the checkpoint lookup reads only its own session ----------
+
+class DigestCheckpointTest(unittest.TestCase):
+    def test_only_items_of_this_session_are_fetched(self):
+        import base64
+        import importlib.util
+        import subprocess
+        path = TOOLS.parent / "plugin" / "scripts" / "brain_session.py"
+        spec = importlib.util.spec_from_file_location("brain_session", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mine, other = "98411f00-aaaa", "0c2d7e11-bbbb"
+        items = {
+            "raw/session/2026/src-20261105-repo-first-98411f/source.yaml": (mine, 1, 40),
+            "raw/session/2026/src-20261105-repo-second-98411f/source.yaml": (mine, 41, 75),
+            "raw/session/2026/src-20261105-repo-else-0c2d7e/source.yaml": (other, 1, 300),
+        }
+        fetched = []
+
+        def fake_sh(cmd, **kw):
+            url = cmd[2]
+            if "/git/trees/" in url:
+                return subprocess.CompletedProcess(cmd, 0, "\n".join(items) + "\n", "")
+            rel = url.split("/contents/", 1)[1]
+            fetched.append(rel)
+            sid, a, b = items[rel]
+            text = f"channel: session\nsession: {sid}\nmessages: [{a}, {b}]\n"
+            return subprocess.CompletedProcess(cmd, 0, base64.b64encode(text.encode()).decode(), "")
+
+        mod.sh = fake_sh
+        self.assertEqual(mod.digested_until_from_repo(mine), 75)
+        self.assertEqual(len(fetched), 2)
+        self.assertTrue(all(rel.split("/")[3].endswith("-98411f") for rel in fetched))
+        # a session without digests costs the listing only
+        fetched.clear()
+        self.assertEqual(mod.digested_until_from_repo("ffffff00-cccc"), 0)
+        self.assertEqual(fetched, [])
+
+
 if __name__ == "__main__":
     unittest.main()

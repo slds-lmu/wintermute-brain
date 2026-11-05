@@ -166,14 +166,22 @@ def save_cache(session_id: str, data: dict) -> None:
 
 def digested_until_from_repo(session_id: str, limit: int = 150) -> int:
     """Derive the checkpoint from raw/session/ in the brain repo: the highest
-    message index any digest of this session covers. Reads the newest
-    `limit` session items (ids sort by date)."""
+    message index any digest of this session covers. Reads only this
+    session's items, at most the newest `limit` (ids sort by date).
+
+    Item ids end in the first 6 characters of the session id (digest_piece),
+    so the listing is filtered by that suffix before any file is fetched.
+    This runs inside the Stop and SessionStart hooks (20 s / 30 s timeout);
+    fetching every session item one by one (0.3-0.5 s per call) would exceed
+    that at about 50 items."""
     r = sh(["gh", "api", f"repos/{REPO}/git/trees/main?recursive=1", "--jq",
             '.tree[] | select(.path | test("^raw/session/[0-9]{4}/[^/]+/source.yaml$")) | .path'])
     if r.returncode != 0:
         log(f"gh tree failed: {r.stderr.strip()[:200]}")
         return 0
-    paths = sorted(r.stdout.split(), key=lambda p: p.split("/")[3], reverse=True)[:limit]
+    suffix = f"-{session_id[:6]}"
+    paths = [p for p in r.stdout.split() if p.split("/")[3].endswith(suffix)]
+    paths = sorted(paths, key=lambda p: p.split("/")[3], reverse=True)[:limit]
     best = 0
     for path in paths:
         c = sh(["gh", "api", f"repos/{REPO}/contents/{path}", "--jq", ".content"])
