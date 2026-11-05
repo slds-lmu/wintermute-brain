@@ -22,6 +22,14 @@ Storage: PDFs stay in git LFS; member clones skip LFS downloads and only the ser
 
 Retrieval and commands: search is hybrid from the MVP, not keyword-only first, because session digests are worded differently from later questions. Answers use both wiki pages and raw sources and say which parts come from which. The `wiki/page/` index is split by first letter. Commands are `/brain-ingest`, `/brain-ask`, `/brain-edit`, `/brain-lint`. Querying works from any repo with the plugin through the server's qmd; a local clone is optional (offline fallback, editing), while ingest and edit use a local working copy [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
 
+## Build vs. reuse and contradictions
+
+The owner accepted the plan to fork `Astro-Han/karpathy-llm-wiki` with qmd and plain git/Markdown; no existing product qualifies as the base. AnythingLLM keeps its data in SQLite/LanceDB, not in git; arkon has no git export and its PolyForm Internal Use licence rules out a fork in `slds-lmu`; nashsu/llm_wiki is GPL-3.0 and auto-ingests on every machine that pulls a shared repo. Team-wiki products have no AI that maintains the wiki. Ideas may be borrowed from arkon and nashsu/llm_wiki, nothing more [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
+
+There is no v0 spike and no retrieval-only baseline (owner decision, 2026-11-05): the first real check is the MVP done-criterion in `00-requirements.md` §7 [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
+
+Changed facts are overwritten in place and git keeps the old version (R5). Real disagreements get a `Status: Disputed` blockquote with both sources cited; lint lists them but does not hunt for contradictions. `Status: Outdated` was dropped because it conflicts with edit-in-place [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md). Research ideas not needed for v1 go into `specs/parked.md` [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
+
 ## Reporting and commit identity
 
 No report files in the repo: failures of unattended operations and scheduled lint runs go to one standing GitHub issue, "Brain health", with one comment per event. A Mattermost ping mirror is parked as K29 [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md).
@@ -44,4 +52,4 @@ A fine-grained PAT has one resource owner, so each owner needs its own token. To
 
 ## Open checks
 
-LFS limits of the `slds-lmu` plan, GitHub Actions minutes for a private repo, and who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open: the PDF converter benchmark, qmd at scale, and the Obsidian link check [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md).
+LFS limits of the `slds-lmu` plan, GitHub Actions minutes for a private repo, and who administers the server worker and the API key [Brain design digest](/wiki/source/src-20261105-wintermute-brain-brain-design-lint-reporting-ag-98411f.md). Also open: the PDF converter benchmark, qmd at scale, and the Obsidian link check [Brain MVP digest](/wiki/source/src-20261105-wintermute-brain-brain-mvp-retrieval-and-comman-98411f.md). Still open: qmd keyword search from the start versus grep-only wording, and cleanup of stale spec text [Build vs. reuse digest](/wiki/source/src-20261105-wintermute-brain-build-vs-reuse-settled-fork-as-98411f.md).
