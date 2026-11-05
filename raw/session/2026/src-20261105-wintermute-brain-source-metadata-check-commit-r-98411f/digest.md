@@ -1,0 +1,13 @@
+# Source-metadata check, commit reasons and plans, Obsidian settings, GitHub limits
+
+- **Source metadata is now checked.** The user chose option (b) for unverified metadata: `tools/check_evidence` flags any `title` or author in `source.yaml` that does not appear in the fetched source. DOI/arXiv-sourced metadata and session digests are exempt. The rule "metadata only from the source; leave the author empty if none is named" is in `01-data-model.md` §4, `03-agent-ops.md` §3 and the brain skill. The first ingest (karpathy-2026-llm-wiki) is flagged, and that known case is recorded in `implementation-status.md`.
+- **Every ingest, compile and edit commit now carries a plan and reasons.** The user approved both ideas. The agent lists planned page creates and updates after triage and before writing (`Planned:` in the commit message), and gives one reason per changed page (`Reasons:`). `tools/commit-op` refuses a commit if any changed page lacks a reason. The user accepted this as a v1 requirement.
+- **Shared Obsidian settings.** The repo ships `.obsidian/app.json` with `useMarkdownLinks: true` and `newLinkFormat: absolute`. `.gitignore` ignores the rest of `.obsidian/`. In the user's Obsidian, the setting appears as "Path from vault folder". Test result: links resolve and backlinks show, so the check passed.
+- **Search-server config verified.** The Claude Code docs confirm that `${VAR:-default}` expansion works in plugin `.mcp.json` files. An empty `BRAIN_QMD_URL` stays empty and does not fall back to the default.
+- **GitHub plan and limits (from the org billing API, read with a token the user extended).** `slds-lmu` is on the Team plan with 307 seats, 182 in use. Usage in 2026 so far:
+  - Actions: 600–1,000 minutes a month, peak 3,217 in May. Net cost $0, except $4.26 in July.
+  - LFS storage: about 5 GB, net cost $0.
+  - LFS downloads: about 0.1 GB a month.
+- **Risk to watch (the assistant's estimate, not measured).** Automatic session digests could add roughly 1,000–2,000 Actions minutes a month, which could exceed the included quota. Two mitigations were named: skip the index run for raw-only PRs, or run workflows on the group server.
+- **Token decision.** The user added org-level "Administration: Read-only" to the `slds-write` token to read billing. The assistant advised against this because it exposes all org settings, not just this repo. The user accepted it. The billing page in a browser was the alternative.
+- **Open items handed to the server maintainer (Marc):** qmd installation and testing at scale, and the PDF converter benchmark (MinerU vs. Marker).
