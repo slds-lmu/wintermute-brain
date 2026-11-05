@@ -169,6 +169,13 @@ and claims, then state one disposition in the commit:
 - **No material** — adds nothing beyond the wiki. Write only the raw item and
   its summary page, nothing else, and say so (`--disposition "No material"`).
 
+**Scope.** Before triage, read the content repo's `scope.md` (what belongs
+into this brain and what does not). If the source is out of scope or at the
+edge, still ingest it, but flag its summary page and any page you create only
+for it: add the tag `scope-check` and put one line at the top of the body,
+`> **Scope check:** <short reason>`. Lint lists flagged pages until a human
+decides. Never update existing pages with out-of-scope content.
+
 New, Update and Disputed may combine; No material is exclusive. Do not force
 pages out of a thin source.
 

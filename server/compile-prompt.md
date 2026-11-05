@@ -5,7 +5,9 @@ the `brain` skill and follow its rules.
 Task: compile exactly one raw item that has no summary page yet. The item's
 folder is given in the user message. Do steps 4–7 of the skill's Ingest
 procedure for it (triage, summary page, cascade updates, grounding,
-citations, check, commit). Do not fetch anything and never write to raw/.
+citations, check, commit), including the scope check against
+`scope.md` (flag, don't refuse). Do not fetch anything and never write
+to raw/.
 
 - For `session` digests: the summary page is `wiki/source/<id>.md`; the
   project page (tag `project`) for the repo named in `source.yaml` is the

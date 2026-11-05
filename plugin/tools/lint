@@ -23,6 +23,8 @@ Checks and levels
   injection      newly added raw text contains prompt-injection patterns   warn
   stale          person/grant/project pages untouched for 6 months         warn
   disputed       open `Status: Disputed` blocks                            info
+  scope-check    page flagged as outside or at the edge of this brain's    warn
+                 scope (tag `scope-check`, 01 § 2.1); `scope.md` missing:  info
 
 Usage
   tools/lint [--fix] [--scope all|changed] [--base REV [--head REV]]
@@ -211,6 +213,22 @@ class Linter:
             for i, line in enumerate(p.text.splitlines(), 1):
                 if DISPUTED_RE.match(line):
                     self.add("info", "disputed", p.rel, "open Status: Disputed block", i)
+
+    def check_scope(self):
+        """Pages the agent flagged against scope.md (01 § 2.1) stay listed
+        until a human deletes them or removes the tag."""
+        if not (self.root / "scope.md").is_file():
+            self.add("info", "scope-check", "scope.md", "no scope.md: agents cannot check sources against this brain's scope")
+        for p in self.scoped_pages():
+            tags = (p.frontmatter or {}).get("tags") or []
+            if isinstance(tags, list) and "scope-check" in tags:
+                reason = ""
+                for line in p.body.splitlines():
+                    if line.strip().lower().startswith("> **scope check:**"):
+                        reason = line.split(":**", 1)[1].strip()
+                        break
+                self.add("warn", "scope-check", p.rel, "flagged as possibly out of scope" + (f": {reason}" if reason else "")
+                         + "; a human deletes the page or removes the tag")
 
     def check_raw_immutable(self):
         if self.changes is None:
@@ -401,6 +419,7 @@ class Linter:
         self.check_injection()
         self.check_stale()
         self.check_disputed()
+        self.check_scope()
         return self.findings
 
 

@@ -104,6 +104,25 @@ write which part of the repo:
 clone, and keeping files outside git would break "repo is the source
 of truth" (N1).
 
+### 2.1 Scope file (owner, 2026-11-05)
+
+Each content repo says in **`scope.md`** what belongs into it and what
+does not, in plain language (one "In" list, one "Out" list). The owner
+of the brain writes it; agents only read it. This makes the scope of
+00 § 3 configurable per brain (e.g. a teaching brain, a leadership
+tier).
+
+- **Flag, don't refuse.** During triage (03 § 3) the agent checks every
+  source against `scope.md`. If it is out of scope or at the edge, the
+  agent still ingests it but flags the summary page (and any page it
+  creates only for this source): tag `scope-check` and, at the top of
+  the body, one line `> **Scope check:** <reason>`.
+- **Lint lists every flagged page** (03 § 5.1) until a human deletes it
+  or removes the tag. No `scope.md` is reported as info.
+- Caveat: flagged content is in git history; clearly private material
+  should not be ingested at all (humans decide what to ingest in the
+  test phase, `parked.md` K27).
+
 ## 3. Naming
 
 Slugs are lowercase kebab-case ASCII, stable, and never reused. Rename

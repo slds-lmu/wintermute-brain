@@ -29,6 +29,8 @@ Multiple concurrent human and agent writers are expected.
 
 In scope: **research**, **leadership / orga**, **teaching**.
 Out of scope: private life (no personal/hobby/health/finance content).
+Each brain states its own scope in `scope.md`; agents flag sources that
+fall outside, and lint lists them (01 § 2.1, 2026-11-05).
 
 ## 4. Use cases (v1 must do these well)
 

@@ -255,6 +255,19 @@ class LintGitTest(Temp):
         self.edit("wiki/page/llm-wiki.md", "Agent-written line.", "")
         self.assertEqual(self.lint("--base", "HEAD", "--agent", "brain-agent-interactive").returncode, 0)
 
+    def test_scope_check_flag_is_listed(self):
+        self.edit("wiki/page/llm-wiki.md", "tags: [", "tags: [scope-check, ")
+        self.edit("wiki/page/llm-wiki.md", "## Definition", "> **Scope check:** looks like a hobby topic\n\n## Definition")
+        r = self.lint()
+        self.assertIn("scope-check", r.stdout)
+        self.assertIn("looks like a hobby topic", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout)   # a flag is a warning, not an error
+
+    def test_missing_scope_file_is_info(self):
+        (self.root / "scope.md").unlink()
+        r = self.lint()
+        self.assertIn("no scope.md", r.stdout)
+
     def test_stale_person_page(self):
         r = self.lint()
         self.assertIn("warn  stale", r.stdout)

@@ -149,8 +149,11 @@ phase, humans decide what gets ingested (00 § 7).
    registry, never from the agent's own knowledge (01 § 4). Raw files
    are never changed afterwards.
    A changed upstream source becomes a new raw item (I8).
-4. **Triage** (I2). Search the wiki for the source's entities, aliases
-   and claims, then state one disposition:
+4. **Triage** (I2). First check the source against the content repo's
+   `scope.md`; if it is out of scope or at the edge, ingest it anyway
+   but flag it (tag `scope-check`, one `> **Scope check:**` line; 01
+   § 2.1). Then search the wiki for the source's entities, aliases
+   and claims, and state one disposition:
    - **New:** the source covers something the wiki doesn't have yet;
    - **Update:** it adds to or changes existing pages;
    - **Disputed:** it contradicts an existing claim on content;
@@ -229,6 +232,7 @@ CI on every push.
 | Lock and human-line rules (agent commits only) | report (blocks) |
 | Newly added raw files contain prompt-injection patterns (A3) | report (flags, doesn't block) |
 | Pages untouched in git for 6 months, for `person`, `grant` and pages tagged `project` | report ("needs refresh") |
+| Pages tagged `scope-check` (01 § 2.1), with their reason; missing `scope.md` | report (warn; info) |
 
 Tested against a known-good fixture wiki plus one broken copy per rule
 (L6). Target: at most ~15% false alarms; noisy rules get tuned or
