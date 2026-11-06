@@ -77,12 +77,12 @@ def session_env(cfg: dict, base: dict | None = None) -> dict:
         tok = expand(cfg.get("token_file", "")).read_text().strip()
         env["GH_TOKEN"] = tok
         env["GITHUB_TOKEN"] = tok
-        env["BRAIN_GITHUB_TOKEN"] = tok
     else:
-        # The plugin's connection to the search server needs the token itself.
         tok = gh_token(env)
-        if tok:
-            env["BRAIN_GITHUB_TOKEN"] = tok
+    # The plugin's connection to the search server needs the token itself. A member
+    # may have exported a narrower one for this.
+    if tok:
+        env.setdefault("BRAIN_GITHUB_TOKEN", tok)
     return env
 
 

@@ -613,12 +613,15 @@ class BrainConfigTest(unittest.TestCase):
             self.assertEqual(env["BRAIN_CAPTURE"].split(os.pathsep), [f"{tmp}/content", f"{tmp}/proj"])
             loaded["search_url"] = "https://search.example/mcp"
             self.assertEqual(mod.session_env(loaded, base={})["BRAIN_QMD_URL"], "https://search.example/mcp")
+            narrow = {"BRAIN_GITHUB_TOKEN": "read-only"}
+            self.assertEqual(mod.session_env(loaded, base=narrow)["BRAIN_GITHUB_TOKEN"], "read-only")
             loaded["login"] = "gh"
             answers = {"token": "gh-login-token"}
             with mock.patch.object(mod, "gh_token", lambda env: answers["token"]):
                 env = mod.session_env(loaded, base={})
                 self.assertNotIn("GH_TOKEN", env)
                 self.assertEqual(env["BRAIN_GITHUB_TOKEN"], "gh-login-token")
+                self.assertEqual(mod.session_env(loaded, base=narrow)["BRAIN_GITHUB_TOKEN"], "read-only")
                 answers["token"] = ""
                 self.assertNotIn("BRAIN_GITHUB_TOKEN", mod.session_env(loaded, base={}))
             with mock.patch.object(mod.subprocess, "run", side_effect=FileNotFoundError):
