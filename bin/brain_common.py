@@ -8,23 +8,28 @@ The member's settings live in one file, ~/.config/brain/config.toml:
     code_dir    = "~/.local/share/brain/code"
     login       = "gh"            # or "token"
     token_file  = ""              # login = "token": file holding the token
-    search_url  = ""              # the server's qmd MCP endpoint, if any
+    search_url  = ""              # the search server; empty = the group's server
     capture     = ["~/brain/wintermute-brain-content-slds"]
 
 `brain` turns it into the environment the plugin and the tools read
-(BRAIN_DIR, BRAIN_REPO, BRAIN_PERSON, BRAIN_QMD_URL, BRAIN_CAPTURE and,
-in token mode, GH_TOKEN), for one Claude Code session only.
+(BRAIN_DIR, BRAIN_REPO, BRAIN_PERSON, BRAIN_QMD_URL, BRAIN_CAPTURE,
+BRAIN_GITHUB_TOKEN and, in token mode, GH_TOKEN), for one Claude Code
+session only.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 CONFIG = Path(os.environ.get("BRAIN_CONFIG", "~/.config/brain/config.toml")).expanduser()
 DEFAULT_REPO = "slds-lmu/wintermute-brain-content-slds"
 CODE_REPO = "slds-lmu/wintermute-brain"
+DEFAULT_SEARCH_URL = "https://api.wintermute-gpu.stat.uni-muenchen.de/brain/mcp"
 
 
 def expand(p: str) -> Path:
@@ -66,11 +71,39 @@ def session_env(cfg: dict, base: dict | None = None) -> dict:
     env["BRAIN_DIR"] = str(expand(cfg["dir"]))
     env["BRAIN_REPO"] = cfg.get("repo", DEFAULT_REPO)
     env["BRAIN_PERSON"] = cfg.get("person", "")
-    if cfg.get("search_url"):
-        env["BRAIN_QMD_URL"] = cfg["search_url"]
+    env["BRAIN_QMD_URL"] = cfg.get("search_url") or DEFAULT_SEARCH_URL
     env["BRAIN_CAPTURE"] = os.pathsep.join(str(expand(p)) for p in cfg.get("capture", []))
     if cfg.get("login") == "token":
         tok = expand(cfg.get("token_file", "")).read_text().strip()
         env["GH_TOKEN"] = tok
         env["GITHUB_TOKEN"] = tok
+        env["BRAIN_GITHUB_TOKEN"] = tok
+    else:
+        # The plugin's connection to the search server needs the token itself.
+        tok = gh_token(env)
+        if tok:
+            env["BRAIN_GITHUB_TOKEN"] = tok
     return env
+
+
+def gh_token(env: dict) -> str:
+    try:
+        r = subprocess.run(["gh", "auth", "token"], env=env, capture_output=True, text=True)
+    except OSError:
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def search_status(url: str, token: str) -> int | None:
+    """HTTP status of a request the search server rejects only after the login.
+
+    405: the login was accepted. 401: it was not. None: no answer. Others: unclear.
+    """
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+    except (OSError, ValueError):
+        return None

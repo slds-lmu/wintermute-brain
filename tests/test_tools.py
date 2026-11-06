@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent          # the code repo
 TOOLS = ROOT / "plugin" / "tools"                       # shipped with the plugin
@@ -607,9 +608,21 @@ class BrainConfigTest(unittest.TestCase):
             self.assertEqual(env["BRAIN_REPO"], "org/content")
             self.assertEqual(env["BRAIN_PERSON"], "jane-doe")
             self.assertEqual(env["GH_TOKEN"], "secret-token")
+            self.assertEqual(env["BRAIN_GITHUB_TOKEN"], "secret-token")
+            self.assertEqual(env["BRAIN_QMD_URL"], mod.DEFAULT_SEARCH_URL)
             self.assertEqual(env["BRAIN_CAPTURE"].split(os.pathsep), [f"{tmp}/content", f"{tmp}/proj"])
+            loaded["search_url"] = "https://search.example/mcp"
+            self.assertEqual(mod.session_env(loaded, base={})["BRAIN_QMD_URL"], "https://search.example/mcp")
             loaded["login"] = "gh"
-            self.assertNotIn("GH_TOKEN", mod.session_env(loaded, base={}))
+            answers = {"token": "gh-login-token"}
+            with mock.patch.object(mod, "gh_token", lambda env: answers["token"]):
+                env = mod.session_env(loaded, base={})
+                self.assertNotIn("GH_TOKEN", env)
+                self.assertEqual(env["BRAIN_GITHUB_TOKEN"], "gh-login-token")
+                answers["token"] = ""
+                self.assertNotIn("BRAIN_GITHUB_TOKEN", mod.session_env(loaded, base={}))
+            with mock.patch.object(mod.subprocess, "run", side_effect=FileNotFoundError):
+                self.assertEqual(mod.gh_token({}), "")
 
 
 class DigestPiecesTest(unittest.TestCase):

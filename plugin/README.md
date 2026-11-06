@@ -51,7 +51,7 @@ npm install -g defuddle              # web ingest only
 # opens the PRs), and it works in containers and on the server without SSH
 # keys (live test 2026-11-05).
 GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/slds-lmu/wintermute-brain-content-slds.git ~/wintermute-brain-content-slds
-# environment (shell profile)
+# environment (shell profile; `brain` sets all of these for its session)
 export BRAIN_DIR=~/wintermute-brain-content-slds
 export BRAIN_REPO=slds-lmu/wintermute-brain-content-slds
 export BRAIN_PERSON=first-last
