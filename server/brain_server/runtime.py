@@ -24,8 +24,10 @@ log = logging.getLogger(__name__)
 BROKEN_SEARCH = re.compile(r"Batch embedding error|Reranker unavailable")
 # A skipped query expansion costs some recall but the models stay usable.
 DEGRADED_SEARCH = re.compile(r"query expansion failed: InsufficientMemoryError")
-# qmd logs each request with its query text, and has no setting to stop that.
+# qmd logs each request with its query text, and has no setting to stop that. It
+# does not escape line breaks in the query, so an entry ends at this mark.
 REQUEST_LINE = re.compile(r"^\d\d:\d\d:\d\d\.\d+ [A-Z]+ /")
+REQUEST_END = re.compile(r" \(\d+ms\)$")
 
 
 def kill(process) -> None:
@@ -132,7 +134,17 @@ class QmdRuntime:
             log.info("Indexed content revision %s", revision)
         self.revision = revision
 
+    async def refresh_safely(self) -> None:
+        try:
+            await self.refresh()
+            self.refresh_failing = False
+        except Exception:
+            # The current index stays usable; /healthz reports the failure.
+            log.exception("Index refresh failed")
+            self.refresh_failing = True
+
     async def watch_log(self, stream) -> None:
+        in_request = False
         # This reader must outlive any output: qmd blocks once the pipe is full.
         while True:
             try:
@@ -143,7 +155,8 @@ class QmdRuntime:
             if not raw:
                 return
             line = raw.decode(errors="replace").rstrip()
-            if REQUEST_LINE.match(line):
+            if in_request or REQUEST_LINE.match(line):
+                in_request = not REQUEST_END.search(line)
                 continue
             if BROKEN_SEARCH.search(line):
                 self.broken_searches += 1
@@ -159,7 +172,7 @@ class QmdRuntime:
         self.state = "warming"
         self.restart_needed = False
         self.configure()
-        await self.refresh()
+        await self.refresh_safely()
         self.process = await asyncio.create_subprocess_exec(
             *qmd_server(self.port),
             env=self.environment(), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -248,15 +261,8 @@ class QmdRuntime:
         """Update the index beside the running qmd, which serves searches meanwhile."""
         while True:
             await asyncio.sleep(self.refresh_interval)
-            if not self.ready.is_set():
-                continue
-            try:
-                await self.refresh()
-                self.refresh_failing = False
-            except Exception:
-                # The current index stays usable; /healthz reports the failure.
-                log.exception("Index refresh failed")
-                self.refresh_failing = True
+            if self.ready.is_set():
+                await self.refresh_safely()
 
     async def run(self) -> None:
         refresher = asyncio.create_task(self.refresh_loop())

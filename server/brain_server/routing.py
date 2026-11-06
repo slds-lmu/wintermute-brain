@@ -92,14 +92,19 @@ class Router:
         self.search_limit = int(os.environ.get("BRAIN_SEARCH_LIMIT", "10"))
         self.searches = 0
 
-    async def _forward(self, call: Call, deadline: float, attempts: float = math.inf) -> httpx.Response:
-        """Forward once qmd is up, and again if it restarts or crashes meanwhile."""
+    async def _forward(
+        self, call: Call, deadline: float, attempts: float = math.inf,
+    ) -> tuple[httpx.Response, int]:
+        """Forward once qmd is up, and again if it restarts or crashes meanwhile.
+
+        Also returns the count of broken searches from before the call that answered.
+        """
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or attempts <= 0:
                 raise TimeoutError
             await asyncio.wait_for(self.runtime.ready.wait(), remaining)
-            attempts -= 1
+            broken = self.runtime.broken_searches
             try:
                 # httpx's own timeout applies per read, not to the whole request.
                 response = await asyncio.wait_for(
@@ -109,12 +114,17 @@ class Router:
                     ),
                     max(0.001, deadline - time.monotonic()),
                 )
+            except httpx.ConnectError:
+                # The call never reached qmd, which is about to restart.
+                pass
             except httpx.HTTPError as error:
-                # qmd was restarted or crashed.
+                # qmd was restarted or crashed during the call.
+                attempts -= 1
                 log.info("Retrying a call: %s", type(error).__name__)
             else:
                 if response.status_code < 500:
-                    return response
+                    return response, broken
+                attempts -= 1
                 log.warning("qmd answered %s; retrying", response.status_code)
             await asyncio.sleep(0.25)
 
@@ -138,7 +148,7 @@ class Router:
         if self.runtime.failing and not self.runtime.ready.is_set():
             return self._unavailable("Search backend unavailable")
         try:
-            response = await self._forward(call, time.monotonic() + self.control_wait)
+            response, _ = await self._forward(call, time.monotonic() + self.control_wait)
         except (TimeoutError, asyncio.TimeoutError):
             return self._unavailable("Search backend unavailable")
         return self._reply(response, call.discovery)
@@ -154,12 +164,13 @@ class Router:
         self.searches += 1
         started = time.monotonic()
         deadline = started + self.search_wait
+        admitted = None
         try:
             await asyncio.wait_for(self.search_slots.acquire(), self.search_wait)
+            admitted = time.monotonic()
             try:
-                broken = self.runtime.broken_searches
                 # A query that crashes qmd must not do so until the deadline.
-                response = await self._forward(call, deadline, attempts=2)
+                response, broken = await self._forward(call, deadline, attempts=2)
                 # Let the log line of a failed search arrive before judging it.
                 await asyncio.sleep(0.05)
                 if self.runtime.broken_searches != broken:
@@ -171,6 +182,11 @@ class Router:
                 self.search_slots.release()
         except (TimeoutError, asyncio.TimeoutError):
             log.warning("Search gave up after %.0f s", time.monotonic() - started)
+            stuck = admitted is not None and time.monotonic() - admitted > self.search_wait / 2
+            if stuck and self.runtime.ready.is_set():
+                # qmd is hanging or has models on the CPU, and cannot cancel a search.
+                log.warning("Restarting qmd after a search without an answer")
+                self.runtime.restart_needed = True
             return self._unavailable("Search got no answer", 30)
         finally:
             self.searches -= 1

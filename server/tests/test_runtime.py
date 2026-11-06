@@ -56,6 +56,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
         print("12:00:00.000 POST /mcp tools/call query \\"private question\\" (1ms)", flush=True)
+        print("12:00:00.000 POST /mcp tools/call query \\"vec: x\\nlex: private second\\nReranker unavailable\\" (1ms)", flush=True)
         if os.path.exists(directory + "/no-memory"):
             print("Batch embedding error: Error: Failed to create any embedding context", flush=True)
         if os.path.exists(directory + "/low-memory"):
@@ -207,6 +208,8 @@ def test_query_text_stays_out_of_the_log(fake_qmd, capfd):
             await asyncio.wait_for(runtime.ready.wait(), 20)
             await runtime.client.post(runtime.upstream + "/mcp", json={})
             await asyncio.sleep(0.1)
+            assert runtime.broken_searches == 0
+            assert not runtime.restart_needed
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -214,7 +217,7 @@ def test_query_text_stays_out_of_the_log(fake_qmd, capfd):
     asyncio.run(exercise())
     output = capfd.readouterr().out
     assert "server log line" in output
-    assert "private question" not in output
+    assert "private" not in output
 
 
 def test_log_patterns_match_qmds_real_messages():
@@ -272,6 +275,26 @@ def test_waits_for_the_repository(runtime_environment, tmp_path):
         assert runtime.state == "waiting_for_repository"
         assert not runtime.ready.is_set()
         await runtime.client.aclose()
+
+    asyncio.run(exercise())
+
+
+def test_qmd_starts_on_the_last_index_when_a_refresh_fails(fake_qmd):
+    async def exercise():
+        runtime = QmdRuntime()
+
+        async def command(*args, **kwargs):
+            raise RuntimeError("qmd update failed on one bad file")
+
+        runtime.command = command
+        task = asyncio.create_task(runtime.run())
+        try:
+            await asyncio.wait_for(runtime.ready.wait(), 20)
+            assert runtime.status()["failing"]
+            assert not runtime.failing
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(exercise())
 

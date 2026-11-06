@@ -95,7 +95,8 @@ no CPU backend, and /healthz answers 503.
 
 Index updates and embeddings run every BRAIN_INDEX_POLL seconds beside the running
 qmd, which qmd supports through WAL and a 120-second busy timeout. If one fails,
-qmd keeps serving the current index and /healthz answers 503.
+qmd keeps serving the current index and /healthz answers 503. This also holds when
+qmd starts. On a new database it then answers without results until a refresh works.
 
 ## GPU MEMORY SHORTAGE
 
@@ -103,19 +104,20 @@ Without enough GPU memory for its models, qmd answers HTTP 200 with no results a
 no error, even for words in the wiki, and the next query after that crashes it
 (SIGILL). It reports the failure only in its log. The gateway therefore reads that log:
 a search during which it reports the failure receives 503, and qmd restarts. Until
-its models fit, /healthz answers 503 and calls receive 503 at once, so that clients
+its models fit, /healthz answers 503 and new calls receive 503 at once, so that clients
 use their local fallback. When only the query expansion lacks memory, qmd searches
 without it and the gateway logs a warning. The rerank fallback score that qmd writes
 to its persistent cache can outlive such a shortage for the affected query.
 
 A model loaded with too little GPU memory can also land partly on the CPU, without any
 message, and stays there after memory returns: searches then take about 12 s at about
-700% CPU, and qmd holds 2.4 GB instead of 3.4 GB. The warmup therefore fails unless
-all models load completely. A first search after idling during a shortage can still
-cause this state, which ends when qmd unloads its models after five idle minutes.
+700% CPU, and qmd holds 2.4 GB instead of 3.4 GB. The warmup therefore fails when qmd
+reports a lack of memory for query expansion, the visible sign of this. Other models
+report nothing, and a first search after idling during a shortage can also cause this
+state. It ends when qmd unloads its models after five idle minutes, or restarts.
 
-The gateway drops qmd's per-request log lines, which contain the query text. qmd
-has no setting for this.
+The gateway drops qmd's per-request log entries, which contain the query text and can
+span lines. qmd has no setting for this.
 
 ## ROUTING
 
@@ -130,7 +132,9 @@ Each running search allocates GPU memory, hence the limit. Beyond BRAIN_SEARCH_L
 a search receives 503 at once. Claude Code abandons a request after 60 seconds
 without response headers, and qmd sends none before its answer is complete, so a
 search without an answer after BRAIN_SEARCH_WAIT seconds receives 503. qmd cannot
-cancel a search, which then runs to completion.
+cancel a search, so the gateway restarts qmd if that search spent over half of this
+time inside qmd, which means qmd hangs or has models on the CPU. A search reaches qmd
+at most twice, so that a query that crashes it cannot keep doing so.
 
 qmd's HTTP server buffers each response until it is complete, so an open
 subscriptions/listen stream delivers neither its acknowledgement nor any
@@ -200,8 +204,9 @@ Python packages come from server/requirements.lock, installed with hash checks.
 Base images are pinned by digest and CI actions by commit. New versions enter
 through server/update-locks.sh, which takes nothing uploaded in the last 14 days, so
 that a compromised release has time to be found. For a fix of a known vulnerability
-inside that period, check the advisory and run the script with
-BRAIN_LOCK_MIN_AGE_DAYS=0 and --upgrade-package. The direct pins in
+inside that period, check the advisory and pass --upgrade-package NAME and
+--exclude-newer-package NAME=<now>. Repeat the latter on later runs until the release
+is 14 days old: the script otherwise moves the package back. The direct pins in
 server/requirements*.txt move by editing them. The pip step sits below the large qmd
 layer, so that a lock update costs hosts a few megabytes. Still unlocked: apt
 packages, the Claude Code and gitleaks downloads (exact versions, no hash), and

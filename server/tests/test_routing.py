@@ -29,6 +29,7 @@ class Qmd:
     state = "ready"
     failing = False
     broken_searches = 0
+    restart_needed = False
 
     def __init__(self, ready=True):
         self.ready = asyncio.Event()
@@ -50,6 +51,7 @@ class Upstream:
         self.calls = 0
         self.block = None
         self.fail = 0
+        self.refuse = 0
         self.status = 200
         self.running = 0
         self.most_running = 0
@@ -64,9 +66,12 @@ class Upstream:
                 await self.block.wait()
             else:
                 await asyncio.sleep(0)
+            if self.refuse:
+                self.refuse -= 1
+                raise httpx.ConnectError("qmd is not listening")
             if self.fail:
                 self.fail -= 1
-                raise httpx.ConnectError("qmd is gone")
+                raise httpx.ReadError("qmd is gone")
             if self.break_search:
                 self.qmd.broken_searches += 1
                 return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"structuredContent": {"results": []}}})
@@ -146,7 +151,7 @@ def test_too_many_searches_fail_at_once():
     run(exercise())
 
 
-def test_search_gives_up_before_clients_do_and_frees_its_slot():
+def test_search_gives_up_before_clients_do_frees_its_slot_and_restarts_a_stuck_qmd():
     async def exercise():
         async with Routed(search_wait=0.05) as (router, qmd, upstream):
             upstream.block = asyncio.Event()
@@ -154,6 +159,16 @@ def test_search_gives_up_before_clients_do_and_frees_its_slot():
             assert response.status_code == 503
             assert router.search_slots._value == 2
             assert router.searches == 0
+            assert qmd.restart_needed
+
+    run(exercise())
+
+
+def test_search_while_qmd_is_down_restarts_nothing():
+    async def exercise():
+        async with Routed(ready=False, search_wait=0.05) as (router, qmd, upstream):
+            assert (await router.search(call())).status_code == 503
+            assert not qmd.restart_needed
 
     run(exercise())
 
@@ -166,6 +181,23 @@ def test_search_waiting_for_a_slot_gives_up_too():
             response = await router.search(call())
             assert response.status_code == 503
             assert upstream.calls == 0
+            assert not qmd.restart_needed
+
+    run(exercise())
+
+
+def test_search_late_for_its_slot_is_no_sign_of_a_stuck_qmd():
+    async def exercise():
+        async with Routed(search_wait=0.2) as (router, qmd, upstream):
+            await router.search_slots.acquire()
+            await router.search_slots.acquire()
+            upstream.block = asyncio.Event()
+            search = asyncio.create_task(router.search(call()))
+            await asyncio.sleep(0.15)
+            router.search_slots.release()
+            assert (await search).status_code == 503
+            assert upstream.calls == 1
+            assert not qmd.restart_needed
 
     run(exercise())
 
@@ -188,6 +220,39 @@ def test_search_survives_a_qmd_restart():
             response = await router.search(call())
             assert response.status_code == 200
             assert upstream.calls == 2
+
+    run(exercise())
+
+
+def test_search_waits_through_the_moments_before_a_restart_shows():
+    async def exercise():
+        async with Routed() as (router, qmd, upstream):
+            upstream.fail = 1
+            upstream.refuse = 3
+            response = await router.search(call())
+            assert response.status_code == 200
+            assert upstream.calls == 5
+
+    run(exercise())
+
+
+def test_search_keeps_a_good_answer_after_an_earlier_failure():
+    async def exercise():
+        async with Routed() as (router, qmd, upstream):
+            answers = iter([httpx.ReadError("qmd is gone"), httpx.Response(200, json=ANSWER)])
+
+            def transport(request):
+                answer = next(answers)
+                if isinstance(answer, Exception):
+                    # A failed warmup comes between this call and the next one.
+                    qmd.broken_searches += 1
+                    raise answer
+                return answer
+
+            router.client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+            response = await router.search(call())
+            await router.client.aclose()
+            assert response.status_code == 200
 
     run(exercise())
 
