@@ -190,6 +190,17 @@ packages containing additional CUDA libraries are omitted. Docker shares
 identical layers between images and containers. Build tools remain in the
 build stage.
 
+Python packages come from server/requirements.lock, installed with hash checks.
+Base images are pinned by digest and CI actions by commit. New versions enter
+through server/update-locks.sh, which takes nothing uploaded in the last 14 days, so
+that a compromised release has time to be found. For a fix of a known vulnerability
+inside that period, check the advisory and run the script with
+BRAIN_LOCK_MIN_AGE_DAYS=0 and --upgrade-package. The direct pins in
+server/requirements*.txt move by editing them. The pip step sits below the large qmd
+layer, so that a lock update costs hosts a few megabytes. Still unlocked: apt
+packages, the Claude Code and gitleaks downloads (exact versions, no hash), and
+Hugging Face model files.
+
 The CMAKE_CUDA_ARCHITECTURES option must be 70 during both build and
 runtime: node-llama-cpp includes CMake options in its binary lookup key.
 The image sets NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_ARCHITECTURES=70.
