@@ -101,7 +101,7 @@ qmd keeps serving the current index and /healthz answers 503.
 
 Without enough GPU memory for its models, qmd answers HTTP 200 with no results and
 no error, even for words in the wiki, and the next query after that crashes it
-(SIGILL). It reports the lack only in its log. The gateway therefore reads that log:
+(SIGILL). It reports the failure only in its log. The gateway therefore reads that log:
 a search during which it reports the failure receives 503, and qmd restarts. Until
 its models fit, /healthz answers 503 and calls receive 503 at once, so that clients
 use their local fallback. When only the query expansion lacks memory, qmd searches

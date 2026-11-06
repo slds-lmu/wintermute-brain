@@ -176,7 +176,7 @@ def test_search_without_gpu_memory_is_an_error_and_not_an_empty_result():
             upstream.break_search = True
             response = await router.search(call())
             assert response.status_code == 503
-            assert b"GPU memory" in response.body
+            assert b"models unavailable" in response.body
 
     run(exercise())
 

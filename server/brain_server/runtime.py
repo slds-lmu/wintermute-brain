@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -17,13 +18,20 @@ import yaml
 
 log = logging.getLogger(__name__)
 
-# qmd reports a lack of GPU memory only here and answers with no or unranked
-# results. The next query after that crashes it (SIGILL), so qmd gets restarted.
+# qmd reports failed models, usually a lack of GPU memory, only in its output and
+# answers with no or unranked results. The next query after that crashes it
+# (SIGILL), so qmd gets restarted.
 BROKEN_SEARCH = re.compile(r"Batch embedding error|Reranker unavailable")
 # A skipped query expansion costs some recall but the models stay usable.
 DEGRADED_SEARCH = re.compile(r"query expansion failed: InsufficientMemoryError")
 # qmd logs each request with its query text, and has no setting to stop that.
 REQUEST_LINE = re.compile(r"^\d\d:\d\d:\d\d\.\d+ [A-Z]+ /")
+
+
+def kill(process) -> None:
+    # A process that just exited may not show in returncode yet.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 def qmd_server(port: int) -> list[str]:
@@ -100,7 +108,7 @@ class QmdRuntime:
             output, _ = await asyncio.wait_for(process.communicate(), timeout)
         except BaseException:
             if process.returncode is None:
-                os.killpg(process.pid, signal.SIGKILL)
+                kill(process)
                 await process.wait()
             raise
         if process.returncode:
@@ -139,7 +147,7 @@ class QmdRuntime:
             if BROKEN_SEARCH.search(line):
                 self.broken_searches += 1
                 self.restart_needed = True
-                log.error("qmd lacks GPU memory; restarting it: %s", line)
+                log.error("qmd could not use its models, usually for lack of GPU memory; restarting it: %s", line)
             elif DEGRADED_SEARCH.search(line):
                 log.warning("qmd lacks GPU memory for query expansion and searched without it")
             else:
@@ -201,7 +209,7 @@ class QmdRuntime:
         # Its log line can arrive after the response.
         await asyncio.sleep(0.05)
         if self.broken_searches != broken:
-            raise RuntimeError("qmd lacks GPU memory for its models")
+            raise RuntimeError("qmd could not load its models")
 
     async def stop(self, state: str) -> None:
         self.ready.clear()
@@ -209,7 +217,7 @@ class QmdRuntime:
         if self.process is not None:
             if self.process.returncode is None:
                 # SIGTERM can spend seconds disposing models; state is in SQLite (WAL).
-                os.killpg(self.process.pid, signal.SIGKILL)
+                kill(self.process)
             await self.process.wait()
             self.process = None
         if self.log_reader is not None:

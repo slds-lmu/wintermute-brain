@@ -164,7 +164,7 @@ class Router:
                 await asyncio.sleep(0.05)
                 if self.runtime.broken_searches != broken:
                     # qmd answered "no results" because it could not search.
-                    return self._unavailable("Search lacks GPU memory", 30)
+                    return self._unavailable("Search models unavailable", 30)
                 log.info("Search took %.1f s", time.monotonic() - started)
                 return self._reply(response)
             finally:

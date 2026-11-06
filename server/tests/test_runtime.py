@@ -193,6 +193,28 @@ def test_log_patterns_match_qmds_real_messages():
     assert not REQUEST_LINE.match("Structured query expansion failed")
 
 
+def test_stop_survives_a_process_that_just_exited(runtime_environment, monkeypatch):
+    class JustExited:
+        pid = 1
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+    def gone(*args):
+        raise ProcessLookupError
+
+    async def exercise():
+        runtime = QmdRuntime()
+        runtime.process = JustExited()
+        monkeypatch.setattr(os, "killpg", gone)
+        await runtime.stop("restarting")
+        assert runtime.process is None
+        await runtime.client.aclose()
+
+    asyncio.run(exercise())
+
+
 def test_log_watcher_survives_a_line_beyond_its_buffer(runtime_environment):
     async def exercise():
         runtime = QmdRuntime()
