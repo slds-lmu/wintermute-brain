@@ -192,6 +192,17 @@ def test_search_survives_a_qmd_restart():
     run(exercise())
 
 
+def test_search_that_keeps_crashing_qmd_stops_retrying():
+    async def exercise():
+        async with Routed() as (router, qmd, upstream):
+            upstream.fail = 99
+            response = await router.search(call())
+            assert response.status_code == 503
+            assert upstream.calls == 2
+
+    run(exercise())
+
+
 def test_search_waits_for_qmd_to_come_up():
     async def exercise():
         async with Routed(ready=False) as (router, qmd, upstream):

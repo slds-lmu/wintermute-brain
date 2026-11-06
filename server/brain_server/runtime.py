@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 # qmd reports a lack of GPU memory only here and answers with no or unranked
 # results. The next query after that crashes it (SIGILL), so qmd gets restarted.
-BROKEN_SEARCH = re.compile(r"Failed to create any embedding context|Reranker unavailable")
+BROKEN_SEARCH = re.compile(r"Batch embedding error|Reranker unavailable")
 # A skipped query expansion costs some recall but the models stay usable.
 DEGRADED_SEARCH = re.compile(r"query expansion failed: InsufficientMemoryError")
 # qmd logs each request with its query text, and has no setting to stop that.

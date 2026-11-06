@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -91,13 +92,14 @@ class Router:
         self.search_limit = int(os.environ.get("BRAIN_SEARCH_LIMIT", "10"))
         self.searches = 0
 
-    async def _forward(self, call: Call, deadline: float) -> httpx.Response:
-        """Forward once qmd is up; a call that needs no change is safe to repeat."""
+    async def _forward(self, call: Call, deadline: float, attempts: float = math.inf) -> httpx.Response:
+        """Forward once qmd is up, and again if it restarts or crashes meanwhile."""
         while True:
             remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if remaining <= 0 or attempts <= 0:
                 raise TimeoutError
             await asyncio.wait_for(self.runtime.ready.wait(), remaining)
+            attempts -= 1
             try:
                 # httpx's own timeout applies per read, not to the whole request.
                 response = await asyncio.wait_for(
@@ -156,7 +158,8 @@ class Router:
             await asyncio.wait_for(self.search_slots.acquire(), self.search_wait)
             try:
                 broken = self.runtime.broken_searches
-                response = await self._forward(call, deadline)
+                # A query that crashes qmd must not do so until the deadline.
+                response = await self._forward(call, deadline, attempts=2)
                 # Let the log line of a failed search arrive before judging it.
                 await asyncio.sleep(0.05)
                 if self.runtime.broken_searches != broken:
@@ -168,6 +171,6 @@ class Router:
                 self.search_slots.release()
         except (TimeoutError, asyncio.TimeoutError):
             log.warning("Search gave up after %.0f s", time.monotonic() - started)
-            return self._unavailable("Search is taking too long", 30)
+            return self._unavailable("Search got no answer", 30)
         finally:
             self.searches -= 1
