@@ -22,13 +22,6 @@ RUN find node_modules/node-llama-cpp/llama/localBuilds \
       -mindepth 2 -maxdepth 2 -type d ! -name Release -exec rm -rf {} + \
     && rm -f node_modules/node-llama-cpp/llama/gitRelease.bundle
 
-# The CPU qmd's backend. Its own stage and layer: the native build above stays
-# cached, so that image updates do not transfer its large layers again.
-FROM node:22.23.4-bookworm-slim AS qmd-cpu
-WORKDIR /build
-COPY server/package-lock.json server/install-cpu-backend.mjs ./
-RUN node install-cpu-backend.mjs /opt/qmd-cpu
-
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04
 COPY --from=node /usr/local/ /usr/local/
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -65,9 +58,6 @@ RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAK
 COPY server/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 COPY --from=qmd-build /opt/qmd/ /opt/qmd/
-COPY --from=qmd-cpu /opt/qmd-cpu/ /opt/qmd/node_modules/@node-llama-cpp/linux-x64/
-COPY server/patch-qmd.sh /tmp/patch-qmd.sh
-RUN sh /tmp/patch-qmd.sh && rm /tmp/patch-qmd.sh
 ENV NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_ARCHITECTURES=70
 WORKDIR /opt/brain
 COPY server/ server/
@@ -77,8 +67,7 @@ RUN chmod 755 server/bin/* \
     && mkdir -p /state /cache /brain \
     && chown 2000:2000 /state /cache /brain \
     && python3 -c "import brain_server.app" \
-    && qmd --version \
-    && node server/check-cpu.mjs
+    && qmd --version
 USER 2000:2000
 EXPOSE 8181
 CMD ["python3", "-m", "uvicorn", "brain_server.app:app", "--host", "0.0.0.0", "--port", "8181", "--no-access-log"]

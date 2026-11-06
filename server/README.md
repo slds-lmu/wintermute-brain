@@ -15,7 +15,7 @@ Clients send a personal GitHub token in the Authorization bearer header.
 The gateway verifies the user and repository read permission. Access
 decisions are cached using token hashes, for five minutes when allowed and
 30 seconds when denied; plaintext tokens are forwarded only to GitHub. The
-qmd HTTP listeners are container-local.
+qmd HTTP listener is container-local.
 
 A failed check answers 401 only when GitHub denied the token. When GitHub
 is unreachable, rate-limited, or answers with a server error, a token allowed
@@ -51,131 +51,80 @@ with working POSIX locks. The database and models are derived state.
 Monitor their space use together with Docker storage. The server clone
 fetches LFS files; GitHub remains the authoritative content store.
 
-## GPU HANDOFF
+## GPU
 
-The GPU qmd holds an exclusive flock on BRAIN_GPU_LOCK while its process
-runs. qmd unloads its models after five idle minutes, by a fixed setting in
-its createStore, and reloads them for the next search in about ten seconds.
-Keep the lock directory on a local filesystem: the coordinator polls it twice
-a second, and flock needs no network. GPU callers publish a locked *.request
-file under
-the adjacent requests directory before waiting for the same lock. The
-request file remains locked until GPU use finishes.
+One qmd process runs on the GPU next to Whisper and MinerU and serves every MCP
+call. It does not yield the GPU and takes no GPU lock. Measured on the V100 with
+16 GB, on real documents of 25 to 280 pages, including scans at 300 dpi and 24
+tables:
 
-The coordinator checks live request files and Redis RQ queues, intermediate
-queues, and non-expired started-job entries. It drains active searches for
-up to BRAIN_GPU_DRAIN seconds, stops qmd, waits for process exit, then
-releases the flock. A search still running at that deadline is killed with
-qmd and continues on the CPU qmd. The gateway starts qmd's server directly:
-qmd's launcher is a separate parent process that exits before the server does,
-and waiting for it would release the GPU while the server still held memory.
-The server inherits the descriptor so a coordinator failure cannot prematurely
-release the lock while it still uses the GPU.
+| Load beside OCR | OCR time | Search, median and maximum | GPU memory |
+| --- | --- | --- | --- |
+| One search at a time | +3-4% | 2.2 s, 7 s | 10.5 GB |
+| Also continuous transcription | +6-8% | 2.2 s, 10 s | 10.5 GB |
+| Four parallel searches and transcription | +15-16% | 3.5 s, 16 s | 11.7 GB |
 
-Before starting the GPU qmd, the coordinator runs check-gpu.mjs. qmd itself
-falls back to its CPU backend without an error when CUDA is unavailable, which
-would look healthy and leave the slower untuned configuration serving searches.
-A failed check, or any other failure of the GPU qmd, makes /healthz answer 503
-until the GPU qmd is ready again, while the CPU qmd keeps answering.
+OCR output stayed byte-identical. Whisper holds about 2.6 GB, MinerU about 3.4 GB at
+its allowance of 8 GB, and qmd 3.4 GB plus about 0.5 GB per further running search.
+An earlier design unloaded qmd for OCR and answered from a CPU qmd, in 30 to 70
+seconds with one search at a time.
 
-Index refreshes leave searches running: qmd supports update, embed, and queries
-on one index at a time, through WAL and a 120-second busy timeout. Text indexing
-and embeddings need the GPU lock here, so the index does not change while the
-GPU is taken. The coordinator checks for GPU demand between these steps only,
-so a GPU caller can wait for a running refresh or warmup: usually about ten
-seconds, and minutes at worst.
+Transcription was measured beside OCR at allowance 8 and two continuous searches,
+on 60 seconds of speech. Text stayed byte-identical and memory peaked at 10.5 GB.
 
-qmd stays unloaded throughout an OCR batch. After all watched queues and
-requesters are idle for BRAIN_GPU_QUIET seconds, it reacquires the lock,
-updates the index and pending embeddings, restarts qmd, and warms the
-models. Orphaned request files are removed after their flock is released.
-Redis failures release the GPU conservatively. Whisper's HTTP server stays
-resident; its batch and memory-recovery lock requests also trigger handoff.
+| Load | Quiet GPU | Beside OCR and search |
+| --- | --- | --- |
+| Realtime session, partial results | 101 | 63 |
+| Realtime session, commit to final text | 0.24 s | 0.23 s |
+| Three realtime sessions, partial results in total | 185 | 102 |
+| Three realtime sessions, commit to final text | 0.4-0.7 s | 1.1-2.3 s |
+| Eight parallel transcriptions, wall time | 8.7 s | 14.8 s |
 
-## CPU QMD AND ROUTING
+Partial results stayed current in all of these, at 0.15 s for the 95th percentile.
+The 280-page OCR under this load took 333 s, against 282 s alone. Searches took 2.6 s
+at the median and 12 s at most.
 
-A second qmd process runs with QMD_FORCE_CPU on the same index and model
-files, without access to the GPU lock. It needs about 0.5 GB while idle and
-about 6 GB with its models loaded, which it unloads after five idle minutes.
-The image carries its backend, the locked @node-llama-cpp/linux-x64 prebuilt.
+qmd loads its models for the first search, in about ten seconds, and unloads them
+after five idle minutes, by a fixed setting in its createStore. It then holds about
+350 MB. The coordinator warms them once when qmd starts.
 
-Its nice value of 19 orders it only within the brain-search container, behind
-the gateway and the GPU qmd. It gives no priority over other containers: the
-kernel shares CPU time between their cgroups first, by equal weight, so a CPU
-search competes evenly with a CPU-heavy OCR job. Whisper needs far less than its
-share and is little affected. To favor OCR over CPU searches, lower cpu_shares
-of brain-search in Compose; searches then take longer under load, up to missing
-their deadline.
+The gateway starts qmd's server directly: qmd's launcher is a separate parent
+process that exits before the server does, so killing and waiting would otherwise
+act on the wrong process. Without GPU access qmd fails to load, as the image holds
+no CPU backend, and /healthz answers 503.
+
+Index updates and embeddings run every BRAIN_INDEX_POLL seconds beside the running
+qmd, which qmd supports through WAL and a 120-second busy timeout. If one fails,
+qmd keeps serving the current index and /healthz answers 503.
+
+## GPU MEMORY SHORTAGE
+
+Without enough GPU memory for its models, qmd answers HTTP 200 with no results and
+no error, even for words in the wiki, and the next query after that crashes it
+(SIGILL). It reports the lack only in its log. The gateway therefore reads that log:
+a search during which it reports the failure receives 503, and qmd restarts. Until
+its models fit, /healthz answers 503 and calls receive 503 at once, so that clients
+use their local fallback. When only the query expansion lacks memory, qmd searches
+without it and the gateway logs a warning. The rerank fallback score that qmd writes
+to its persistent cache can outlive such a shortage for the affected query.
+
+The gateway drops qmd's per-request log lines, which contain the query text. qmd
+has no setting for this.
+
+## ROUTING
 
 | Call | Handling |
 | --- | --- |
-| tools/call query | GPU qmd if available, otherwise a race (below) |
-| subscriptions/listen | CPU qmd, with an empty notification filter |
-| server/discover, initialize | CPU qmd, with listChanged removed from the answer |
-| Everything else | CPU qmd; GPU qmd only while the CPU qmd restarts |
+| tools/call query | Two run at a time; BRAIN_SEARCH_LIMIT run or wait in total |
+| subscriptions/listen | qmd, with an empty notification filter |
+| server/discover, initialize | qmd, with listChanged removed from the answer |
+| Everything else | qmd, with no limit; these calls load no model |
 
-Only query uses models: get, multi_get, status, and discovery read SQLite.
-Those calls take no GPU admission, so they work and do not delay a handoff
-in any GPU state.
-
-A search the GPU qmd cannot admit starts on the CPU qmd as well, while it keeps
-waiting for the GPU. So does a GPU search still running after BRAIN_GPU_HEDGE
-seconds, which may be hanging. Responses are returned only once complete, so
-the first complete response wins and the other attempt is abandoned. A plain
-answer carries X-Brain-Backend; the gateway logs the winner in every case. After
-BRAIN_SEARCH_WAIT seconds without an answer, the client receives 503 with
-Retry-After. The clone/index fallback applies.
-
-Claude Code abandons a request after 60 seconds without response headers,
-unless MCP_TOOL_TIMEOUT or the server's timeout setting raises that limit, and
-qmd sends none before its answer is complete. A search still running after
-BRAIN_ANSWER_WAIT seconds therefore receives 200 with text/event-stream
-headers, a comment line every BRAIN_KEEPALIVE seconds, and finally the answer
-as one event. At the deadline this stream carries a JSON-RPC error in place of
-the 503. Cache-Control: no-transform keeps Caddy's encode from buffering it.
-A client that does not accept text/event-stream gets a plain response at the
-end. Claude Code 2.1.318 accepted such an answer after 248 seconds.
-
-The CPU qmd runs one search at a time, and at most BRAIN_CPU_QUEUE searches may
-run or wait. Further ones receive 503 at once, so that clients fall back to
-the clone/index path instead of waiting for minutes. qmd cannot cancel a search,
-and one keeps its threads after its client has gone. Abandoning a running search,
-because the GPU answered first or the client disconnected, therefore kills
-the process with SIGKILL. The supervisor restarts it in under a second, and
-calls arriving meanwhile retry. It also restarts a process that fails three
-health checks in a row, and /healthz answers 503 when the CPU qmd has been
-down for over a minute. An abandoned GPU search runs to completion
-because reloading its models would cost more. Attempts share qmd's persistent
-LLM cache in SQLite, so an expansion finished on the CPU also serves the GPU.
-
-CPU and GPU use the same models and settings, and expansion sampling is
-random on both. Measurements on the V100 VM (20 vCPUs, Xeon Gold 6148, 13
-candidates) follow; a GPU search takes 2-3 seconds, or about 10 seconds when
-its models have to load first.
-
-| CPU load from other processes at nice 0 | CPU search | Expansion | Reranking |
-| --- | --- | --- | --- |
-| None | 18-20 s | 2-8 s | 13-16 s |
-| 10 busy processes | 58-72 s | 10-15 s | 41-49 s |
-| 20 busy processes | 88-116 s | 37-60 s | 47-52 s |
-
-These are small candidates of about 1,650 characters. A growing corpus will
-take longer: qmd reranks up to 40 candidates of up to 900 tokens. A 900-token
-chunk took 3.6 seconds per reranking context, which suggests about 80 seconds on
-an idle CPU at that limit, and that searches under load would then reach
-BRAIN_SEARCH_WAIT. Measure again when the corpus has grown. candidateLimit is
-the available lever, at some cost in quality.
-
-Expansion stops at 600 tokens, about 30 seconds on an idle CPU, or after qmd's
-limit of 300 seconds, in which case qmd searches for the original query alone.
-
-Thread counts matter on this CPU. Generation yields 21.8 tokens per second
-with 10 threads and 4.6 with 20, the number qmd uses by default, so
-BRAIN_CPU_EXPAND_THREADS defaults to half the vCPUs and patch-qmd.sh adds the
-setting to qmd in the image. Two reranking contexts of 10 threads each are
-faster than one of 20 or four of 5, because qmd activates only one context per
-10 candidates. Do not restrict the container with a cpuset: llama.cpp would
-still start one thread per vCPU, and a search took 432 seconds on 8 of the 20.
+Each running search allocates GPU memory, hence the limit. Beyond BRAIN_SEARCH_LIMIT
+a search receives 503 at once. Claude Code abandons a request after 60 seconds
+without response headers, and qmd sends none before its answer is complete, so a
+search without an answer after BRAIN_SEARCH_WAIT seconds receives 503. qmd cannot
+cancel a search, which then runs to completion.
 
 qmd's HTTP server buffers each response until it is complete, so an open
 subscriptions/listen stream delivers neither its acknowledgement nor any
@@ -204,27 +153,14 @@ runs, so clients lose nothing.
 | BRAIN_AUTH_CACHE | /state/auth; private installation-token cache |
 | ANTHROPIC_API_KEY | Worker only |
 | BRAIN_SEARCH_SERVICE_TOKEN | Shared only by search and compile worker |
-| BRAIN_GPU_LOCK | /data/locks/gpu.lock |
-| BRAIN_GPU_QUEUES | mineru,whisper |
-| BRAIN_REDIS_URL | redis://redis:6379/0 |
-| BRAIN_GPU_POLL | 0.5 seconds |
-| BRAIN_GPU_QUIET | 5 seconds |
-| BRAIN_GPU_DRAIN | 30 seconds; wait for active searches before stopping qmd |
 | BRAIN_INDEX_POLL | 60 seconds |
-| BRAIN_SEARCH_WAIT | 280 seconds; below Caddy's 300-second header limit |
-| BRAIN_ANSWER_WAIT | 20 seconds; switch to an event stream after this time |
-| BRAIN_KEEPALIVE | 15 seconds; comment lines on that stream |
-| BRAIN_GPU_SEARCH_TIMEOUT | 180 seconds |
-| BRAIN_CONTROL_WAIT | 30 seconds; calls that need no model |
-| BRAIN_GPU_HEDGE | 30 seconds; a GPU search then also starts on the CPU |
-| BRAIN_CPU_QUEUE | 4; searches running or waiting on the CPU qmd |
-| BRAIN_CPU_HEALTH_INTERVAL | 30 seconds |
+| BRAIN_SEARCH_SLOTS | 2; searches running at once |
+| BRAIN_SEARCH_LIMIT | 10; searches running or waiting |
+| BRAIN_SEARCH_WAIT | 55 seconds; below Claude Code's 60-second header limit |
+| BRAIN_CONTROL_WAIT | 30 seconds; calls that need no model, while qmd is down |
+| BRAIN_QMD_PORT | 8182 |
 | BRAIN_QMD_ENTRY | qmd's dist/cli/qmd.js in the image |
-| BRAIN_CPU_PARALLELISM | 2; reranking contexts of the CPU qmd, sharing all vCPUs |
-| BRAIN_CPU_EXPAND_THREADS | Half the vCPUs; query expansion threads of the CPU qmd |
-| BRAIN_CPU_NICE | 19 |
-| BRAIN_CPU_PORT | 8183 |
-| BRAIN_CPU_STARTUP | 60 seconds |
+| BRAIN_QMD_POLL | 1 second; check on the qmd process |
 | BRAIN_LOG_LEVEL | INFO |
 | BRAIN_QMD_STATE | /state/qmd; collection configuration |
 | XDG_CACHE_HOME | /cache; qmd database and models |
@@ -252,10 +188,7 @@ The runtime uses the same CUDA base image as the GPU server's Whisper
 image. Node llama.cpp is compiled against that runtime; optional platform
 packages containing additional CUDA libraries are omitted. Docker shares
 identical layers between images and containers. Build tools remain in the
-build stage. The CPU backend has its own stage and 28 MB layer, verified
-against the lock file, so that the native build stage stays cached. Keep it
-that way: changing package.json rebuilds that stage and makes every host
-download its large layers again. The build fails if the backend cannot load.
+build stage.
 
 The CMAKE_CUDA_ARCHITECTURES option must be 70 during both build and
 runtime: node-llama-cpp includes CMake options in its binary lookup key.
@@ -280,11 +213,10 @@ Content operations continue to use the plugin/tools write path.
     python -m unittest discover -s tests
     ruff check --select E4,E7,E9,F,I server
 
-GET /healthz reports gateway health, the GPU qmd's state, whether it is ready,
-and whether the CPU qmd is available. It is public, so it omits the indexed
-revision, which the log records. The gateway remains healthy while yielding the
-GPU. Deployment validation
-must also exercise an authorized MCP search and a multi-job GPU handoff.
+GET /healthz reports gateway health, qmd's state, and whether it is ready. It answers
+503 while qmd or the index refresh is failing. It is public, so it omits the indexed
+revision, which the log records. Deployment validation must also exercise an
+authorized MCP search and a search during OCR.
 
 CI runs Python 3.10, matching Ubuntu 22.04 in the image, and Python 3.12.
 Use asyncio.TimeoutError for asyncio deadlines on both versions.
