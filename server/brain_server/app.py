@@ -1,4 +1,4 @@
-"""Authenticated MCP gateway in front of the GPU and CPU qmd."""
+"""Authenticated MCP gateway in front of qmd."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from .routing import (
     is_search,
     without_subscriptions,
 )
-from .runtime import CpuQmd, QmdRuntime
+from .runtime import QmdRuntime
 
 MAX_BODY = 1024 * 1024
 
@@ -62,7 +62,7 @@ async def authorization_failure(request: Request, access) -> Response | None:
     )
 
 
-def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
+def create_app(runtime=None, access=None, qmd_client=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         logging.basicConfig(
@@ -71,10 +71,8 @@ def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
         )
         # At INFO it logs a line per upstream request.
         logging.getLogger("httpx").setLevel(logging.WARNING)
-        gpu_qmd = runtime or QmdRuntime()
-        cpu_qmd = cpu or CpuQmd(gpu_qmd)
-        app.state.runtime = gpu_qmd
-        app.state.cpu = cpu_qmd
+        qmd = runtime or QmdRuntime()
+        app.state.runtime = qmd
         async with (
             httpx.AsyncClient(timeout=15) as github,
             httpx.AsyncClient(timeout=180) as own_qmd_client,
@@ -82,35 +80,23 @@ def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
             app.state.access = access or RepoAccess(
                 github, os.environ.get("BRAIN_REPO", "slds-lmu/wintermute-brain-content-slds"),
             )
-            app.state.router = Router(gpu_qmd, cpu_qmd, qmd_client or own_qmd_client)
-            tasks = [asyncio.create_task(gpu_qmd.run()), asyncio.create_task(cpu_qmd.run())]
+            app.state.router = Router(qmd, qmd_client or own_qmd_client)
+            task = asyncio.create_task(qmd.run())
             try:
                 yield
             finally:
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/healthz")
     async def health():
-        # Public: no content revision here. A failing qmd stays visible to
-        # monitoring although the other one keeps answering. The CPU qmd may
-        # restart briefly at any time, the GPU qmd is judged by its own record.
+        # Public: no content revision here.
         status = app.state.runtime.status()
-        failed = (
-            status["state"] in {"starting", "waiting_for_repository", "error", "stopped"}
-            or status.get("failing", False)
-            or app.state.cpu.down_for() > 60
-        )
+        failed = status["failing"] or status["state"] in {"starting", "waiting_for_repository", "error", "stopped"}
         return JSONResponse(
-            {
-                "status": "unavailable" if failed else "ok",
-                "state": status["state"],
-                "ready": status["ready"],
-                "cpu": app.state.cpu.available.is_set(),
-            },
+            {"status": "unavailable" if failed else "ok", "state": status["state"], "ready": status["ready"]},
             status_code=503 if failed else 200,
         )
 
@@ -138,10 +124,8 @@ def create_app(runtime=None, cpu=None, access=None, qmd_client=None) -> FastAPI:
             },
             discovery=is_discovery(payload),
         )
-        if isinstance(payload, dict) and "text/event-stream" in request.headers.get("accept", ""):
-            call.event_id = payload.get("id")
         if is_search(payload):
-            return await app.state.router.search(call, request.is_disconnected)
+            return await app.state.router.search(call)
         return await app.state.router.control(call)
 
     return app

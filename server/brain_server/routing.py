@@ -1,17 +1,17 @@
-"""Send MCP calls to the GPU or CPU qmd. Searches race; other calls need no model."""
+"""Forward MCP calls to qmd, with a limit on the searches that use GPU memory."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
-from typing import AsyncIterator, Awaitable, Callable
 
 import httpx
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 
 log = logging.getLogger(__name__)
 
@@ -19,13 +19,6 @@ HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
     "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
 }
-# Status for a request whose client has gone; nobody reads the response.
-CLIENT_CLOSED = 499
-STILL_SEARCHING = b": searching\n\n"
-
-
-class BackendFailed(Exception):
-    """A qmd instance could not answer, as opposed to answering with an error."""
 
 
 @dataclass
@@ -34,9 +27,6 @@ class Call:
     body: bytes
     headers: dict[str, str]
     discovery: bool = False
-    # The JSON-RPC id, when the client also accepts an SSE response.
-    event_id: int | str | None = None
-    gpu_admitted_at: float | None = None
 
 
 def _is_search(message: object) -> bool:
@@ -56,29 +46,12 @@ def is_discovery(payload: object) -> bool:
     return isinstance(payload, dict) and payload.get("method") in {"server/discover", "initialize"}
 
 
-def as_event(response: Response, request_id: int | str) -> bytes:
-    """The body of a finished search as the single event of an SSE response."""
-    if response.headers.get("content-type", "").startswith("text/event-stream"):
-        return response.body
-    try:
-        message = json.loads(response.body)
-    except ValueError:
-        message = None
-    if not isinstance(message, dict) or "jsonrpc" not in message:
-        detail = message.get("detail") if isinstance(message, dict) else None
-        message = {
-            "jsonrpc": "2.0", "id": request_id,
-            "error": {"code": -32000, "message": detail or "Search failed"},
-        }
-    return b"event: message\ndata: " + json.dumps(message).encode() + b"\n\n"
-
-
 def without_list_changed(content: bytes) -> bytes:
     """Stop advertising change notifications, so that clients do not subscribe.
 
     qmd's HTTP server buffers a whole response before sending it, so it can
     deliver no notification. Claude Code would otherwise wait 25 seconds for an
-    acknowledgement that never arrives, and reopen a closed stream indefinitely.
+    acknowledgement that never arrives, and reopen a closed stream three times.
     """
     try:
         message = json.loads(content)
@@ -108,182 +81,112 @@ def without_subscriptions(payload: object, body: bytes) -> bytes:
 
 
 class Router:
-    def __init__(self, runtime, cpu, client: httpx.AsyncClient) -> None:
+    def __init__(self, runtime, client: httpx.AsyncClient) -> None:
         self.runtime = runtime
-        self.cpu = cpu
         self.client = client
-        # Caddy gives up on the gateway after 300 s.
-        self.search_wait = float(os.environ.get("BRAIN_SEARCH_WAIT", "280"))
+        # Claude Code abandons a request after 60 s without response headers.
+        self.search_wait = float(os.environ.get("BRAIN_SEARCH_WAIT", "55"))
         self.control_wait = float(os.environ.get("BRAIN_CONTROL_WAIT", "30"))
-        self.gpu_search_timeout = float(os.environ.get("BRAIN_GPU_SEARCH_TIMEOUT", "180"))
-        # A GPU search normally takes seconds: past this, it may be hanging.
-        self.gpu_hedge = float(os.environ.get("BRAIN_GPU_HEDGE", "30"))
-        # Searches on the CPU qmd, running or queued, before others fail at once.
-        self.cpu_queue_limit = int(os.environ.get("BRAIN_CPU_QUEUE", "4"))
-        self.cpu_attempts = 0
-        # Claude Code gives up on a request without response headers after 60 s.
-        self.answer_wait = float(os.environ.get("BRAIN_ANSWER_WAIT", "20"))
-        self.keepalive = float(os.environ.get("BRAIN_KEEPALIVE", "15"))
-        self.tick = 0.25
+        # Each running search allocates GPU memory: 3.4 GB idle, 5.1 GB with four.
+        self.search_slots = asyncio.Semaphore(int(os.environ.get("BRAIN_SEARCH_SLOTS", "2")))
+        self.search_limit = int(os.environ.get("BRAIN_SEARCH_LIMIT", "10"))
+        self.searches = 0
 
-    async def _forward(self, upstream: str, call: Call, timeout: float) -> httpx.Response:
-        try:
-            response = await self.client.request(
-                call.method, upstream + "/mcp", content=call.body, headers=call.headers,
-                timeout=timeout,
-            )
-        except httpx.HTTPError as error:
-            raise BackendFailed(type(error).__name__) from error
-        if response.status_code >= 500:
-            raise BackendFailed(f"qmd answered {response.status_code}")
-        return response
+    async def _forward(
+        self, call: Call, deadline: float, attempts: float = math.inf,
+    ) -> tuple[httpx.Response, int]:
+        """Forward once qmd is up, and again if it restarts or crashes meanwhile.
 
-    @staticmethod
-    def _reply(upstream: httpx.Response, backend: str, discovery: bool = False) -> Response:
-        headers = {
-            name: value for name, value in upstream.headers.items()
-            if name.lower() not in HOP_HEADERS | {"content-encoding"}
-        }
-        headers["X-Brain-Backend"] = backend
-        content = without_list_changed(upstream.content) if discovery else upstream.content
-        return Response(content, status_code=upstream.status_code, headers=headers)
+        Also returns the count of broken searches from before the call that answered.
+        """
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or attempts <= 0:
+                raise TimeoutError
+            await asyncio.wait_for(self.runtime.ready.wait(), remaining)
+            broken = self.runtime.broken_searches
+            try:
+                # httpx's own timeout applies per read, not to the whole request.
+                response = await asyncio.wait_for(
+                    self.client.request(
+                        call.method, self.runtime.upstream + "/mcp", content=call.body, headers=call.headers,
+                        timeout=None,
+                    ),
+                    max(0.001, deadline - time.monotonic()),
+                )
+            except httpx.ConnectError:
+                # The call never reached qmd, which is about to restart.
+                pass
+            except httpx.HTTPError as error:
+                # qmd was restarted or crashed during the call.
+                attempts -= 1
+                log.info("Retrying a call: %s", type(error).__name__)
+            else:
+                if response.status_code < 500:
+                    return response, broken
+                attempts -= 1
+                log.warning("qmd answered %s; retrying", response.status_code)
+            await asyncio.sleep(0.25)
 
-    def _unavailable(self, detail: str, retry_after: int) -> JSONResponse:
+    def _unavailable(self, detail: str, retry_after: int = 5) -> JSONResponse:
         return JSONResponse(
             {"detail": detail, "state": self.runtime.state},
             status_code=503, headers={"Retry-After": str(retry_after)},
         )
 
+    @staticmethod
+    def _reply(upstream: httpx.Response, discovery: bool = False) -> Response:
+        headers = {
+            name: value for name, value in upstream.headers.items()
+            if name.lower() not in HOP_HEADERS | {"content-encoding"}
+        }
+        content = without_list_changed(upstream.content) if discovery else upstream.content
+        return Response(content, status_code=upstream.status_code, headers=headers)
+
     async def control(self, call: Call) -> Response:
-        """Run a call that needs no model, independently of the GPU's state."""
-        deadline = time.monotonic() + self.control_wait
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return self._unavailable("Search backend unavailable", 5)
-            try:
-                if self.cpu.available.is_set():
-                    upstream = await self._forward(self.cpu.upstream, call, remaining)
-                    return self._reply(upstream, "cpu", call.discovery)
-                if self.runtime.ready.is_set():
-                    async with self.runtime.admission():
-                        upstream = await self._forward(self.runtime.upstream, call, remaining)
-                    return self._reply(upstream, "gpu", call.discovery)
-            except BackendFailed as error:
-                # The CPU qmd restarts within a second after an aborted search.
-                log.info("Retrying a call without model use: %s", error)
-            await asyncio.sleep(0.1)
-
-    async def _gpu_attempt(self, call: Call, delay: float = 0) -> httpx.Response:
-        if delay:
-            await asyncio.sleep(delay)
-        async with self.runtime.admission():
-            call.gpu_admitted_at = time.monotonic()
-            return await self._forward(self.runtime.upstream, call, self.gpu_search_timeout)
-
-    async def _cpu_attempt(self, call: Call) -> httpx.Response:
-        async with self.cpu.search_slot:
-            await self.cpu.available.wait()
-            try:
-                return await self._forward(self.cpu.upstream, call, self.search_wait)
-            except asyncio.CancelledError:
-                # Disconnecting from qmd does not stop its search.
-                log.info("Abandoning a CPU search: killing the CPU qmd")
-                self.cpu.abort()
-                raise
-
-    async def search(self, call: Call, disconnected: Callable[[], Awaitable[bool]]) -> Response:
-        """Answer plainly if that is quick, otherwise as an SSE event when ready.
-
-        qmd cannot stream, so response headers normally wait for the answer. A
-        search on the CPU can take longer than clients wait for those headers.
-        """
-        race = asyncio.create_task(self._race(call, disconnected))
-        if call.event_id is None:
-            return await race
-        done, _ = await asyncio.wait({race}, timeout=self.answer_wait)
-        if done:
-            return race.result()
-        return StreamingResponse(
-            self._events(race, call.event_id),
-            media_type="text/event-stream",
-            # no-transform: Caddy would otherwise buffer the stream to compress it.
-            headers={"Cache-Control": "no-cache, no-transform"},
-        )
-
-    async def _events(self, race: asyncio.Task, request_id: int | str) -> AsyncIterator[bytes]:
+        """Run a call that loads no model."""
+        if self.runtime.failing and not self.runtime.ready.is_set():
+            return self._unavailable("Search backend unavailable")
         try:
-            yield STILL_SEARCHING
-            while True:
-                done, _ = await asyncio.wait({race}, timeout=self.keepalive)
-                if done:
-                    break
-                yield STILL_SEARCHING
-            response = race.result()
-            if response.status_code != CLIENT_CLOSED:
-                yield as_event(response, request_id)
-        finally:
-            # Also reached when the client disconnects from the stream.
-            race.cancel()
+            response, _ = await self._forward(call, time.monotonic() + self.control_wait)
+        except (TimeoutError, asyncio.TimeoutError):
+            return self._unavailable("Search backend unavailable")
+        return self._reply(response, call.discovery)
 
-    def _start_cpu_attempt(self, call: Call) -> asyncio.Task:
-        self.cpu_attempts += 1
-        task = asyncio.create_task(self._cpu_attempt(call))
-
-        def finished(_: asyncio.Task) -> None:
-            self.cpu_attempts -= 1
-
-        task.add_done_callback(finished)
-        return task
-
-    async def _race(self, call: Call, disconnected: Callable[[], Awaitable[bool]]) -> Response:
-        """Run a search on the GPU; while it is taken, race the CPU against it."""
+    async def search(self, call: Call) -> Response:
+        """Run a search once a slot is free, within the time clients wait."""
+        if self.runtime.failing and not self.runtime.ready.is_set():
+            # Answer at once, so that clients use their local fallback.
+            return self._unavailable("Search backend unavailable", 30)
+        if self.searches >= self.search_limit:
+            log.warning("Too many searches at once")
+            return self._unavailable("Search is busy", 30)
+        self.searches += 1
         started = time.monotonic()
         deadline = started + self.search_wait
-        gpu = asyncio.create_task(self._gpu_attempt(call))
-        cpu = None
-        cpu_failures = 0
+        admitted = None
         try:
-            while True:
-                pending = {task for task in (gpu, cpu) if task is not None}
-                done, _ = await asyncio.wait(
-                    pending, timeout=self.tick, return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in done:
-                    backend = "gpu" if task is gpu else "cpu"
-                    try:
-                        response = task.result()
-                    except BackendFailed as error:
-                        log.warning("Search failed on the %s qmd: %s", backend, error)
-                        if task is gpu:
-                            # qmd was stopped or crashed: wait for the next
-                            # admission and let the CPU take over meanwhile.
-                            call.gpu_admitted_at = None
-                            gpu = asyncio.create_task(self._gpu_attempt(call, delay=1))
-                        else:
-                            cpu_failures += 1
-                            cpu = None
-                        continue
-                    log.info("Search answered by the %s qmd in %.1f s", backend, time.monotonic() - started)
-                    return self._reply(response, backend)
-                now = time.monotonic()
-                gpu_running = call.gpu_admitted_at is not None
-                if cpu is None and cpu_failures < 3 and (
-                    not gpu_running or now - call.gpu_admitted_at >= self.gpu_hedge
-                ):
-                    if self.cpu_attempts < self.cpu_queue_limit:
-                        cpu = self._start_cpu_attempt(call)
-                    elif not gpu_running:
-                        # Let the client fall back at once rather than after minutes.
-                        log.warning("CPU search queue is full")
-                        return self._unavailable("Search is busy", 30)
-                if now >= deadline:
-                    log.warning("Search gave up after %.0f s", now - started)
-                    return self._unavailable("Search is waiting for a free backend", 30)
-                if await disconnected():
-                    return Response(status_code=CLIENT_CLOSED)
+            await asyncio.wait_for(self.search_slots.acquire(), self.search_wait)
+            admitted = time.monotonic()
+            try:
+                # A query that crashes qmd must not do so until the deadline.
+                response, broken = await self._forward(call, deadline, attempts=2)
+                # Let the log line of a failed search arrive before judging it.
+                await asyncio.sleep(0.05)
+                if self.runtime.broken_searches != broken:
+                    # qmd answered "no results" because it could not search.
+                    return self._unavailable("Search models unavailable", 30)
+                log.info("Search took %.1f s", time.monotonic() - started)
+                return self._reply(response)
+            finally:
+                self.search_slots.release()
+        except (TimeoutError, asyncio.TimeoutError):
+            log.warning("Search gave up after %.0f s", time.monotonic() - started)
+            stuck = admitted is not None and time.monotonic() - admitted > self.search_wait / 2
+            if stuck and self.runtime.ready.is_set():
+                # qmd is hanging or has models on the CPU, and cannot cancel a search.
+                log.warning("Restarting qmd after a search without an answer")
+                self.runtime.restart_needed = True
+            return self._unavailable("Search got no answer", 30)
         finally:
-            attempts = [task for task in (gpu, cpu) if task is not None]
-            for task in attempts:
-                task.cancel()
-            await asyncio.gather(*attempts, return_exceptions=True)
+            self.searches -= 1

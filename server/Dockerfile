@@ -1,9 +1,9 @@
-FROM node:22.23.4-bookworm-slim AS node
+FROM node:22.23.4-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
 
 # Build only the V100's sm70 backend. CUDA 13 has dropped this architecture.
 # Optional platform packages would bundle additional CUDA libraries; compile
 # against the same CUDA runtime layers used by wintermute's Whisper image.
-FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 AS qmd-build
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04@sha256:d49bb8a4ff97fb5fe477947a3f02aa8c0a53eae77e11f00ec28618a0bcaa2ad1 AS qmd-build
 COPY --from=node /usr/local/ /usr/local/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -22,14 +22,7 @@ RUN find node_modules/node-llama-cpp/llama/localBuilds \
       -mindepth 2 -maxdepth 2 -type d ! -name Release -exec rm -rf {} + \
     && rm -f node_modules/node-llama-cpp/llama/gitRelease.bundle
 
-# The CPU qmd's backend. Its own stage and layer: the native build above stays
-# cached, so that image updates do not transfer its large layers again.
-FROM node:22.23.4-bookworm-slim AS qmd-cpu
-WORKDIR /build
-COPY server/package-lock.json server/install-cpu-backend.mjs ./
-RUN node install-cpu-backend.mjs /opt/qmd-cpu
-
-FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04@sha256:63a18dd805367dacfb077aeced8384ab2fb569598ec5f5f5220c3f90a5c23650
 COPY --from=node /usr/local/ /usr/local/
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -62,12 +55,10 @@ RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAK
     && rm /tmp/gitleaks.tar.gz \
     && npm install --global @anthropic-ai/claude-code@2.1.318 \
     && npm cache clean --force
-COPY server/requirements.txt /tmp/requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 COPY --from=qmd-build /opt/qmd/ /opt/qmd/
-COPY --from=qmd-cpu /opt/qmd-cpu/ /opt/qmd/node_modules/@node-llama-cpp/linux-x64/
-COPY server/patch-qmd.sh /tmp/patch-qmd.sh
-RUN sh /tmp/patch-qmd.sh && rm /tmp/patch-qmd.sh
+# Below the large qmd layer, so that a lock update does not move that layer.
+COPY server/requirements.lock /tmp/requirements.lock
+RUN python3 -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/requirements.lock
 ENV NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_ARCHITECTURES=70
 WORKDIR /opt/brain
 COPY server/ server/
@@ -77,8 +68,7 @@ RUN chmod 755 server/bin/* \
     && mkdir -p /state /cache /brain \
     && chown 2000:2000 /state /cache /brain \
     && python3 -c "import brain_server.app" \
-    && qmd --version \
-    && node server/check-cpu.mjs
+    && qmd --version
 USER 2000:2000
 EXPOSE 8181
 CMD ["python3", "-m", "uvicorn", "brain_server.app:app", "--host", "0.0.0.0", "--port", "8181", "--no-access-log"]
