@@ -50,6 +50,7 @@ class QmdRuntime:
         self.upstream = f"http://127.0.0.1:{self.port}"
         self.poll = float(os.environ.get("BRAIN_QMD_POLL", "1"))
         self.refresh_interval = float(os.environ.get("BRAIN_INDEX_POLL", "60"))
+        self.gpu_needed = int(os.environ.get("BRAIN_QMD_GPU_MIB", "6000"))
         self.ready = asyncio.Event()
         self.state = "starting"
         self.process = None
@@ -59,7 +60,6 @@ class QmdRuntime:
         self.refresh_failing = False
         # Searches compare this before and after their call to qmd.
         self.broken_searches = 0
-        self.degraded_searches = 0
         self.restart_needed = False
         self.revision = ""
         self.client = httpx.AsyncClient(timeout=180)
@@ -163,7 +163,6 @@ class QmdRuntime:
                 self.restart_needed = True
                 log.error("qmd could not use its models, usually for lack of GPU memory; restarting it: %s", line)
             elif DEGRADED_SEARCH.search(line):
-                self.degraded_searches += 1
                 log.warning("qmd lacks GPU memory for query expansion and searched without it")
             else:
                 print(line, flush=True)
@@ -171,6 +170,13 @@ class QmdRuntime:
     async def start(self) -> None:
         self.state = "warming"
         self.restart_needed = False
+        # A model loaded with too little memory can land partly on the CPU, without any
+        # message, and stays there after memory returns. So load only once they fit.
+        free = int((await self.command(
+            "nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits",
+        )).split()[0])
+        if free < self.gpu_needed:
+            raise RuntimeError(f"{free} MiB of GPU memory free; qmd waits for {self.gpu_needed} MiB")
         self.configure()
         await self.refresh_safely()
         self.process = await asyncio.create_subprocess_exec(
@@ -195,10 +201,8 @@ class QmdRuntime:
                 await asyncio.sleep(0.25)
         else:
             raise RuntimeError("qmd startup timed out")
-        # Loads all models, which also shows now whether they fit. A model short of
-        # memory can land partly on the CPU and stay there after memory returns, so
-        # this accepts nothing less than a complete load.
-        failures = self.broken_searches + self.degraded_searches
+        # Loads all models, which also shows now whether they fit.
+        broken = self.broken_searches
         response = await self.client.post(
             self.upstream + "/mcp",
             headers={
@@ -225,7 +229,7 @@ class QmdRuntime:
             raise RuntimeError("qmd warmup failed: " + json.dumps(result)[:1000])
         # Its log line can arrive after the response.
         await asyncio.sleep(0.05)
-        if self.broken_searches + self.degraded_searches != failures:
+        if self.broken_searches != broken:
             raise RuntimeError("qmd could not load its models")
 
     async def stop(self, state: str) -> None:

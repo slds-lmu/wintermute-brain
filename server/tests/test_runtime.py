@@ -101,7 +101,7 @@ def starts(directory):
 
 
 async def no_command(*args, **kwargs):
-    return "revision"
+    return "16000\n" if args[0] == "nvidia-smi" else "revision"
 
 
 async def until(condition, timeout=20):
@@ -167,31 +167,50 @@ def test_lack_of_gpu_memory_restarts_qmd_and_stays_visible_until_it_fits(fake_qm
     asyncio.run(exercise())
 
 
-def test_warmup_accepts_no_partial_load_but_a_running_qmd_keeps_serving(fake_qmd, monkeypatch):
+def test_qmd_loads_only_once_its_models_fit(fake_qmd, monkeypatch):
     async def exercise():
         runtime = QmdRuntime()
-        runtime.command = no_command
+        free = {"mib": "1100\n"}
+
+        async def command(*args, **kwargs):
+            return free["mib"] if args[0] == "nvidia-smi" else "revision"
+
+        runtime.command = command
         real_sleep = asyncio.sleep
 
         async def short_sleep(seconds):
             await real_sleep(min(seconds, 0.05))
 
         monkeypatch.setattr(asyncio, "sleep", short_sleep)
-        (fake_qmd / "low-memory").touch()
         task = asyncio.create_task(runtime.run())
         try:
             await until(lambda: runtime.status()["failing"])
             assert not runtime.ready.is_set()
-            (fake_qmd / "low-memory").unlink()
+            assert not starts(fake_qmd)
+            free["mib"] = "13000\n"
             await until(lambda: runtime.ready.is_set() and not runtime.status()["failing"])
-            started = len(starts(fake_qmd))
+            assert len(starts(fake_qmd)) == 1
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_running_qmd_keeps_serving_when_only_query_expansion_lacks_memory(fake_qmd):
+    async def exercise():
+        runtime = QmdRuntime()
+        runtime.command = no_command
+        task = asyncio.create_task(runtime.run())
+        try:
+            await asyncio.wait_for(runtime.ready.wait(), 20)
             (fake_qmd / "low-memory").touch()
             response = await runtime.client.post(runtime.upstream + "/mcp", json={})
             assert response.status_code == 200
-            await until(lambda: runtime.degraded_searches >= 2)
-            await real_sleep(0.1)
+            await asyncio.sleep(0.2)
             assert runtime.ready.is_set()
-            assert len(starts(fake_qmd)) == started
+            assert not runtime.restart_needed
+            assert len(starts(fake_qmd)) == 1
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -284,6 +303,8 @@ def test_qmd_starts_on_the_last_index_when_a_refresh_fails(fake_qmd):
         runtime = QmdRuntime()
 
         async def command(*args, **kwargs):
+            if args[0] == "nvidia-smi":
+                return "16000\n"
             raise RuntimeError("qmd update failed on one bad file")
 
         runtime.command = command

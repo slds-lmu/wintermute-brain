@@ -110,11 +110,10 @@ without it and the gateway logs a warning. The rerank fallback score that qmd wr
 to its persistent cache can outlive such a shortage for the affected query.
 
 A model loaded with too little GPU memory can also land partly on the CPU, without any
-message, and stays there after memory returns: searches then take about 12 s at about
-700% CPU, and qmd holds 2.4 GB instead of 3.4 GB. The warmup therefore fails when qmd
-reports a lack of memory for query expansion, the visible sign of this. Other models
-report nothing, and a first search after idling during a shortage can also cause this
-state. It ends when qmd unloads its models after five idle minutes, or restarts.
+message, and stays there after memory returns: searches then take 10-12 s at 500-700%
+CPU, and qmd holds 2.4 GB instead of 3.4 GB. qmd therefore starts only with
+BRAIN_QMD_GPU_MIB free. A first search after idling during a shortage can still cause
+this state, which ends when qmd unloads its models after five idle minutes, or restarts.
 
 The gateway drops qmd's per-request log entries, which contain the query text and can
 span lines. qmd has no setting for this.
@@ -168,6 +167,7 @@ runs, so clients lose nothing.
 | BRAIN_SEARCH_LIMIT | 10; searches running or waiting |
 | BRAIN_SEARCH_WAIT | 55 seconds; below Claude Code's 60-second header limit |
 | BRAIN_CONTROL_WAIT | 30 seconds; calls that need no model, while qmd is down |
+| BRAIN_QMD_GPU_MIB | 6000; free GPU memory qmd waits for before loading its models |
 | BRAIN_QMD_PORT | 8182 |
 | BRAIN_QMD_ENTRY | qmd's dist/cli/qmd.js in the image |
 | BRAIN_QMD_POLL | 1 second; check on the qmd process |
