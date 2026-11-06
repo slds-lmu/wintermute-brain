@@ -75,9 +75,10 @@ one command sets everything up and checks it; one command starts work.
      Claude Code found; reports clearly what is wrong.
 - **`brain`** (start work): updates the code copy to the latest `main`,
   sets the brain settings for this session only (the search address, and
-  the login's token for the search server; in token mode also for `gh` and
-  git), and starts Claude Code with the brain plugin. Arguments are passed
-  to Claude Code. `brain --check` includes the search server.
+  the login's token for the search server unless `BRAIN_GITHUB_TOKEN` is
+  already exported; in token mode also for `gh` and git), and starts Claude
+  Code with the brain plugin. Arguments are passed to Claude Code.
+  `brain --check` includes the search server.
 - **Captured sessions** (N6): a session is captured only if it runs in a
   folder listed under `capture` in the config, or below it. The content
   repo is listed by default; others are added by the member. Elsewhere
@@ -246,7 +247,9 @@ and a search without an answer after 55 seconds receives an error. Clients then
 use their local fallback (§ 3). qmd reports a lack of GPU memory only in its log
 and answers with no results. The gateway watches that log, returns an error
 instead of a false "nothing found", and restarts qmd, which otherwise crashes on
-the next query. The index and models are local persistent mounts outside images.
+the next query. It also restarts qmd after a search without an answer, because qmd
+cannot cancel a search. The index and models are local persistent mounts outside
+images.
 
 Members use personal GitHub tokens with read access to the content repo.
 The compile worker uses a separate internal service credential for MCP.

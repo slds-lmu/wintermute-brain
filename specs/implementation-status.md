@@ -111,9 +111,10 @@ Problems found and how they were handled:
 - **One GPU qmd (06 § 9, PR #35)** replaced the accepted handoff to OCR, on
   measurements. The owner's agreement is pending.
 - **Search login scope.** In `gh` login mode `brain` sends the member's `gh`
-  token, usually with broad scopes, to the search server on every request. The
-  gateway forwards it only to GitHub and keeps no plaintext copy. Options: (a)
-  leave it; (b) have `setup-brain` ask for a separate read-only token for search.
+  token, usually with broad scopes, to the search server on every request, unless
+  they export a narrower `BRAIN_GITHUB_TOKEN`. The gateway forwards it only to
+  GitHub and keeps no plaintext copy. Options: (a) leave it; (b) have `setup-brain`
+  ask for a separate read-only token for search.
   Recommendation: (b), at the cost of one setup step. Owner to decide.
 
 ## 6. Changes after the live tests (2026-11-05)
