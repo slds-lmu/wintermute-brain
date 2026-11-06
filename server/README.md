@@ -108,6 +108,12 @@ use their local fallback. When only the query expansion lacks memory, qmd search
 without it and the gateway logs a warning. The rerank fallback score that qmd writes
 to its persistent cache can outlive such a shortage for the affected query.
 
+A model loaded with too little GPU memory can also land partly on the CPU, without any
+message, and stays there after memory returns: searches then take about 12 s at about
+700% CPU, and qmd holds 2.4 GB instead of 3.4 GB. The warmup therefore fails unless
+all models load completely. A first search after idling during a shortage can still
+cause this state, which ends when qmd unloads its models after five idle minutes.
+
 The gateway drops qmd's per-request log lines, which contain the query text. qmd
 has no setting for this.
 

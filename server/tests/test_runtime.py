@@ -58,6 +58,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("12:00:00.000 POST /mcp tools/call query \\"private question\\" (1ms)", flush=True)
         if os.path.exists(directory + "/no-memory"):
             print("Batch embedding error: Error: Failed to create any embedding context", flush=True)
+        if os.path.exists(directory + "/low-memory"):
+            print("Structured query expansion failed: InsufficientMemoryError: too large", flush=True)
         self.reply(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode())
 
     def log_message(self, *args):
@@ -157,6 +159,38 @@ def test_lack_of_gpu_memory_restarts_qmd_and_stays_visible_until_it_fits(fake_qm
             assert len(starts(fake_qmd)) >= 2
             (fake_qmd / "no-memory").unlink()
             await until(lambda: runtime.ready.is_set() and not runtime.status()["failing"])
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
+def test_warmup_accepts_no_partial_load_but_a_running_qmd_keeps_serving(fake_qmd, monkeypatch):
+    async def exercise():
+        runtime = QmdRuntime()
+        runtime.command = no_command
+        real_sleep = asyncio.sleep
+
+        async def short_sleep(seconds):
+            await real_sleep(min(seconds, 0.05))
+
+        monkeypatch.setattr(asyncio, "sleep", short_sleep)
+        (fake_qmd / "low-memory").touch()
+        task = asyncio.create_task(runtime.run())
+        try:
+            await until(lambda: runtime.status()["failing"])
+            assert not runtime.ready.is_set()
+            (fake_qmd / "low-memory").unlink()
+            await until(lambda: runtime.ready.is_set() and not runtime.status()["failing"])
+            started = len(starts(fake_qmd))
+            (fake_qmd / "low-memory").touch()
+            response = await runtime.client.post(runtime.upstream + "/mcp", json={})
+            assert response.status_code == 200
+            await until(lambda: runtime.degraded_searches >= 2)
+            await real_sleep(0.1)
+            assert runtime.ready.is_set()
+            assert len(starts(fake_qmd)) == started
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
