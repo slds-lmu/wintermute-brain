@@ -3,7 +3,7 @@ FROM node:22.23.4-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68ae
 # Build only the V100's sm70 backend. CUDA 13 has dropped this architecture.
 # Optional platform packages would bundle additional CUDA libraries; compile
 # against the same CUDA runtime layers used by wintermute's Whisper image.
-FROM nvidia/cuda:12.6.3-devel-ubuntu22.04@sha256:d49bb8a4ff97fb5fe477947a3f02aa8c0a53eae77e11f00ec28618a0bcaa2ad1 AS qmd-build
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04@sha256:392c0df7b577ecae17a17f6ba7f2009c217bb4422f8431c053ae9af61a8c148a AS qmd-build
 COPY --from=node /usr/local/ /usr/local/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -22,12 +22,14 @@ RUN find node_modules/node-llama-cpp/llama/localBuilds \
       -mindepth 2 -maxdepth 2 -type d ! -name Release -exec rm -rf {} + \
     && rm -f node_modules/node-llama-cpp/llama/gitRelease.bundle
 
-FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04@sha256:63a18dd805367dacfb077aeced8384ab2fb569598ec5f5f5220c3f90a5c23650
+# The runtime base of wintermute's Whisper and MinerU images, digest included, so
+# that the GPU host stores its layers once.
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04@sha256:92906d87596d638d35015c6353053121bd299d25943b875763321653884ba924
 COPY --from=node /usr/local/ /usr/local/
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/brain/server \
-    PATH=/opt/brain/server/bin:/opt/qmd/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PATH=/opt/brain/server/bin:/opt/qmd/node_modules/.bin:/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HOME=/state \
     XDG_CACHE_HOME=/cache \
     BRAIN_DIR=/brain/repo \
@@ -42,12 +44,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     GIT_CONFIG_VALUE_0=/opt/brain/server/bin/git-credential-brain \
     GIT_CONFIG_KEY_1=credential.useHttpPath \
     GIT_CONFIG_VALUE_1=true
+# Python packages go into a virtual environment on PATH: Ubuntu 24.04 marks its
+# own Python as externally managed (PEP 668).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       python3 python3-pip git git-lfs gh openssl curl ca-certificates libgomp1 libnuma1 \
+       python3 python3-venv git git-lfs gh openssl curl ca-certificates libgomp1 libnuma1 \
     && groupadd --gid 2000 wintermute \
     && useradd --uid 2000 --gid wintermute --home-dir /state --no-create-home wintermute \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv
 ARG GITLEAKS_VERSION=8.30.1
 RUN curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_$GITLEAKS_VERSION""_linux_x64.tar.gz" \
       -o /tmp/gitleaks.tar.gz \

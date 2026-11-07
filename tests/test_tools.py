@@ -585,7 +585,7 @@ class CaptureScopeTest(unittest.TestCase):
             self.assertEqual(r.stdout.strip(), "")
 
 
-# bin/ runs on members' machines and needs tomllib; the server image has Python 3.10.
+# bin/ runs on members' machines and needs tomllib, which came with Python 3.11.
 @unittest.skipIf(sys.version_info < (3, 11), "bin/ needs Python 3.11")
 class BrainConfigTest(unittest.TestCase):
     def test_config_roundtrip_and_session_env(self):

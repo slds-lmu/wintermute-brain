@@ -246,5 +246,6 @@ GET /healthz reports gateway health, qmd's state, and whether it is ready. It an
 revision, which the log records. Deployment validation must also exercise an
 authorized MCP search and a search during OCR.
 
-CI runs Python 3.10, matching Ubuntu 22.04 in the image, and Python 3.12.
+CI runs Python 3.12, the image's (Ubuntu 24.04), and Python 3.10, the oldest the
+member tools support.
 Use asyncio.TimeoutError for asyncio deadlines on both versions.
