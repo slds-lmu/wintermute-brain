@@ -74,9 +74,11 @@ one command sets everything up and checks it; one command starts work.
   7. checks the result: repo visible and writable, git fetch works,
      Claude Code found; reports clearly what is wrong.
 - **`brain`** (start work): updates the code copy to the latest `main`,
-  sets the brain settings (and, in token mode, the token) for this
-  session only, and starts Claude Code with the brain plugin. Arguments
-  are passed to Claude Code.
+  sets the brain settings for this session only (the search address, and
+  the login's token for the search server unless `BRAIN_GITHUB_TOKEN` is
+  already exported; in token mode also for `gh` and git), and starts Claude
+  Code with the brain plugin. Arguments are passed to Claude Code.
+  `brain --check` includes the search server.
 - **Captured sessions** (N6): a session is captured only if it runs in a
   folder listed under `capture` in the config, or below it. The content
   repo is listed by default; others are added by the member. Elsewhere
@@ -85,7 +87,8 @@ one command sets everything up and checks it; one command starts work.
 ## 3. Search (Q2, Q9)
 
 - **One central qmd on the server**, re-indexed after every pull
-  (§ 4). Members' agents query it over MCP. Hybrid mode uses the GPU.
+  (§ 4). Members' agents query it over MCP. Hybrid mode uses the GPU,
+  which it shares with transcription and PDF conversion (§ 9).
 - **Fallback:** if the server is unreachable, the agent uses the
   generated indexes plus grep on the local clone. Nothing depends on
   qmd (CLAUDE.md, tool independence).
@@ -215,3 +218,47 @@ could push the org past its included minutes. PDFs add a few GB of LFS
 per thousand papers. **Watch the Actions minutes once session digests
 run;** options then are a cheaper check (skip the index Action for
 raw-only PRs) or a self-hosted runner on the group server.
+
+## 9. Container deployment
+
+The GPU deployment uses a shared application image for the compile worker
+and authenticated search gateway. The code repository owns the Dockerfile
+and server-image workflow. The VM operations repository owns Compose,
+Ansible, Caddy, secrets, host paths, and the immutable image pin. Review
+branches may publish a pinned image without merging their PR.
+
+The content clone is wintermute-brain-content-slds. The worker updates its
+code copy to the latest main before invoking plugin/tools and the compile
+plugin (§ 2.1). Service infrastructure runs from the pinned container image,
+so the compile tools follow main without a new image, and the gateway changes
+only when the pin does.
+
+One qmd process runs on the GPU next to Whisper and MinerU and serves every
+MCP call. It does not yield the GPU, because all three fit: measured on the
+16 GB V100, with four parallel search streams, continuous transcription, and
+OCR, the peak was 11.7 GB. OCR took 3-16% longer and its output stayed
+byte-identical; searches took 2-4 seconds meanwhile. An earlier design unloaded
+qmd for OCR and answered from a second qmd on the CPU, in 30-70 seconds.
+
+qmd loads its models for the first search and unloads them after five idle
+minutes. Index updates run while it serves searches. The gateway runs two
+searches at a time, because each one allocates GPU memory; up to eight more wait,
+and a search without an answer after 55 seconds receives an error. Clients then
+use their local fallback (§ 3). qmd reports a lack of GPU memory only in its log
+and answers with no results. The gateway watches that log, returns an error
+instead of a false "nothing found", and restarts qmd, which otherwise crashes on
+the next query. It also restarts qmd after a search without an answer, because qmd
+cannot cancel a search. The index and models are local persistent mounts outside
+images.
+
+Members use personal GitHub tokens with read access to the content repo.
+The compile worker uses a separate internal service credential for MCP.
+Only the public MCP and health routes are exposed by Caddy. The GitHub
+App is installed on the code and content repos; git and gh renew their
+installation tokens without periodic worker restarts.
+
+Operational details and validation commands are in server/README.md.
+
+qmd's HTTP server buffers every response until it is complete, so it can
+deliver no notification on an open stream. The gateway therefore does not
+advertise change notifications, and clients do not subscribe to them.

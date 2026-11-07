@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+"""Run gh with a currently valid installation token."""
+from brain_server.github_auth import gh
+
+gh()

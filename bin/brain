@@ -2,9 +2,9 @@
 """brain — start a Claude Code session with the brain (06 § 2.1).
 
 Updates the code copy to the latest `main`, sets the brain settings from
-~/.config/brain/config.toml for this session only (and, in token mode,
-the brain's token), and starts Claude Code with the brain plugin. All
-arguments are passed on to Claude Code, e.g. `brain -p "…"`.
+~/.config/brain/config.toml for this session only (including the login's
+token for the search server), and starts Claude Code with the brain plugin.
+All arguments are passed on to Claude Code, e.g. `brain -p "…"`.
 
     brain            start Claude Code with the brain
     brain --check    check the setup without starting Claude Code
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from brain_common import expand, load_config, session_env  # noqa: E402
+from brain_common import expand, load_config, search_status, session_env  # noqa: E402
 
 
 def check(cfg: dict, env: dict) -> int:
@@ -49,6 +49,16 @@ def check(cfg: dict, env: dict) -> int:
                            capture_output=True, text=True)
         report(r.returncode == 0, "git can reach the content repo with the same login",
                r.stderr.strip()[:200] or "git fetch failed")
+    url = env["BRAIN_QMD_URL"]
+    status = search_status(url, env.get("BRAIN_GITHUB_TOKEN", ""))
+    if status == 401:
+        report(False, f"search server accepts the login ({url})",
+               f"it refused the login, which needs read access to {repo}; run gh auth login or check the brain token")
+    else:
+        # 405: the login passed and qmd has no GET route. Others say nothing about the login.
+        report(status == 405, f"search server accepts the login ({url})",
+               f"no clear answer ({status or 'not reachable'}): agents use the local indexes and grep "
+               "until the server is back", optional=True)
     print("setup OK" if ok else "setup has problems (see FAIL above)")
     return 0 if ok else 1
 

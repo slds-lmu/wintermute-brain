@@ -25,6 +25,7 @@ Specs 00–06 accepted; this repo *is* the brain repo (later
 | Plugin: `/brain-ingest`, `/brain-ask`, `/brain-edit`, `/brain-lint`, `brain` skill, qmd MCP config | `plugin/` | 05, 03 |
 | Session digests: Stop/SessionStart/SessionEnd hooks, background digest agent (Haiku), gitleaks, raw-only PR via the GitHub API | `plugin/scripts/` | 02 § 2 |
 | Server: compile worker (poll, derived queue, 3 tries + backoff, qmd re-index), GitHub App token, qmd auth proxy, systemd units | `server/` | 06, 02 § 2.4 |
+| Search gateway: GitHub token checks that survive GitHub outages and limit unauthenticated use, one GPU qmd next to OCR and transcription, limited parallel searches, errors instead of false empty results when GPU memory runs out | `server/brain_server/` | 06 § 3, § 9 |
 
 ## 2. Decisions taken while implementing (made by Marc's agent in PR #1; all reviewed by the owner 2026-11-05)
 
@@ -107,6 +108,14 @@ Problems found and how they were handled:
 - **Not yet tested live:** the server worker on the actual server. Paper
   ingest was done by Marc (PR #15).
 - Who administers the server worker and the API key (06 § 8).
+- **One GPU qmd (06 § 9, PR #35)** replaced the accepted handoff to OCR, on
+  measurements. The owner's agreement is pending.
+- **Search login scope.** In `gh` login mode `brain` sends the member's `gh`
+  token, usually with broad scopes, to the search server on every request, unless
+  they export a narrower `BRAIN_GITHUB_TOKEN`. The gateway forwards it only to
+  GitHub and keeps no plaintext copy. Options: (a) leave it; (b) have `setup-brain`
+  ask for a separate read-only token for search.
+  Recommendation: (b), at the cost of one setup step. Owner to decide.
 
 ## 6. Changes after the live tests (2026-11-05)
 
@@ -307,11 +316,12 @@ ingest. Findings (open unless marked):
   pages from the raw source, stated its limits and the newest source's
   date, declined the personal judgment by design, and reported the
   search fallback.
-- **N12** The search server is not configured for members: the README
-  does not mention `BRAIN_QMD_URL`, so the plugin tries `localhost` and
-  gets "connection refused" (fallback to index + grep works and is
-  reported). Once the server's search runs, members need its URL and
-  login in the setup.
+- **N12 (fixed 2026-11-06)** The search server was not configured for
+  members: the plugin tried `localhost` and got "connection refused"
+  (fallback to index + grep works and is reported). Also, `.mcp.json` reads
+  `BRAIN_GITHUB_TOKEN`, which `brain` did not set in either login mode, so
+  every member would have got a 401. `brain` now sets the address and the
+  token, and `brain --check` tests them.
 - **N13** Review `slds-paper-litdownload` and the connected SLDS skills
   (litsearch, litbrowse, …) that paper ingest relies on: what they
   fetch, where they write, their dependencies, and whether they fit the
