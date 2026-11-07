@@ -212,9 +212,9 @@ server/requirements*.txt move by editing them. The pip step sits below the large
 layer, so that a lock update costs hosts a few megabytes.
 
 The CUDA base stays on one digest, because a new one moves every layer. Ubuntu's
-security updates come through a layer after the pip step instead; a new
+security and stable updates come through a layer after the pip step instead; a new
 SECURITY_UPDATES date in the Dockerfile rebuilds only that layer and those below it.
-NVIDIA's packages are not touched. The infrastructure repository's vulnerability
+NVIDIA's packages, which would offer CUDA 13, are not touched. The infrastructure repository's vulnerability
 scan reports when that is due. Still unlocked: the Claude Code and gitleaks
 downloads (exact versions, no hash), and Hugging Face model files.
 
