@@ -202,15 +202,21 @@ build stage.
 
 Python packages come from server/requirements.lock, installed with hash checks.
 Base images are pinned by digest and CI actions by commit. New versions enter
-through server/update-locks.sh, which takes nothing uploaded in the last 14 days, so
-that a compromised release has time to be found. For a fix of a known vulnerability
-inside that period, check the advisory and pass --upgrade-package NAME and
---exclude-newer-package NAME=<now>. Repeat the latter on later runs until the release
-is 14 days old: the script otherwise moves the package back. The direct pins in
+through server/update-locks.sh, which takes nothing uploaded in the last 3 days:
+compromised releases are usually found within hours. A fix of a known vulnerability
+may skip that period, as such releases get more attention: check the advisory and
+pass --upgrade-package NAME and --exclude-newer-package NAME=<now>. Repeat the
+latter on later runs until the release is 3 days old: the script otherwise moves the
+package back. The monthly routine passes --upgrade. The direct pins in
 server/requirements*.txt move by editing them. The pip step sits below the large qmd
-layer, so that a lock update costs hosts a few megabytes. Still unlocked: apt
-packages, the Claude Code and gitleaks downloads (exact versions, no hash), and
-Hugging Face model files.
+layer, so that a lock update costs hosts a few megabytes.
+
+The CUDA base stays on one digest, because a new one moves every layer. Ubuntu's
+security updates come through a layer after the pip step instead; a new
+SECURITY_UPDATES date in the Dockerfile rebuilds only that layer and those below it.
+NVIDIA's packages are not touched. The infrastructure repository's vulnerability
+scan reports when that is due. Still unlocked: the Claude Code and gitleaks
+downloads (exact versions, no hash), and Hugging Face model files.
 
 The CMAKE_CUDA_ARCHITECTURES option must be 70 during both build and
 runtime: node-llama-cpp includes CMake options in its binary lookup key.

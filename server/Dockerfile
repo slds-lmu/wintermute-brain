@@ -59,6 +59,15 @@ COPY --from=qmd-build /opt/qmd/ /opt/qmd/
 # Below the large qmd layer, so that a lock update does not move that layer.
 COPY server/requirements.lock /tmp/requirements.lock
 RUN python3 -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/requirements.lock
+# Ubuntu's security updates (not NVIDIA's packages) on top of the pinned CUDA base,
+# whose digest stays fixed because a new one moves every layer. A new date here
+# rebuilds only this layer and those below it.
+ARG SECURITY_UPDATES=2026-11-07
+RUN echo "Ubuntu security updates as of $SECURITY_UPDATES" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+       $(apt list --upgradable 2>/dev/null | awk -F/ '/-security/ {print $1}') \
+    && rm -rf /var/lib/apt/lists/*
 ENV NODE_LLAMA_CPP_CMAKE_OPTION_CMAKE_CUDA_ARCHITECTURES=70
 WORKDIR /opt/brain
 COPY server/ server/
