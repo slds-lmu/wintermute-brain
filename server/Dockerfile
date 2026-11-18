@@ -67,7 +67,7 @@ RUN python3 -m pip install --no-cache-dir --require-hashes --only-binary=:all: -
 # Ubuntu's security and stable updates (not NVIDIA's packages) on top of the CUDA
 # base, whose digest stays fixed because a new one moves every layer. A new date
 # here rebuilds only this layer and those below it.
-ARG SECURITY_UPDATES=2026-11-07
+ARG SECURITY_UPDATES=2026-11-18
 RUN echo "Ubuntu security and stable updates as of $SECURITY_UPDATES" \
     && apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade \
